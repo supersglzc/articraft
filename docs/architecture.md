@@ -4,13 +4,13 @@ Articraft is designed for scalable articulated 3D asset generation through itera
 
 ## Project Structure & Module Organization
 
-- **`agent/`**: Contains the generation runtime, provider adapters, prompt compiler/loader, tools, cost tracking, TUI helpers, and batch orchestration.
-- **`storage/`**: Owns the canonical `data/` layout, records, categories, dataset metadata, batch specs, run caches, materialization metadata, and search indexes.
+- **`engine/agent/`**: Generation runtime, the Gemini adapter, prompt compiler/loader, tools, cost tracking, TUI helpers, and batch orchestration.
+- **`engine/storage/`**: Owns the canonical `data/` layout, records, categories, dataset metadata, batch specs, run caches, materialization metadata, and search indexes.
 - **`sdk/`** & **`sdk/_core/`**: Define the articulated-object SDK layers used by the generation models.
 - **`sdk/_docs/`** & **`sdk/_examples/`**: Agent-facing authoring reference material and assets.
-- **`viewer/api/`**: Exposes the FastAPI surface.
-- **`viewer/web/`**: The React/TypeScript/Three.js viewer used for inspecting object and geometry structures visually.
-- **`cli/`**: Contains the `articraft` entry points and subcommands.
+- **`engine/viewer/api/`**: Exposes the FastAPI surface.
+- **`engine/viewer/web/`**: The React/TypeScript/Three.js viewer used for inspecting object and geometry structures visually.
+- **`engine/cli/`**: Contains the `articraft` entry points and subcommands.
 - **`tests/`**: Mirrors the main packages with focused smoke and regression coverage.
 
 ## Dataset & Workbench Concepts
@@ -24,4 +24,4 @@ See [Dataset Generation](dataset_generation.md) for detailed workflows on creati
 ## Dependencies
 
 - **Python Runtime**: Pinned to version `3.12` for `uv` (currently avoids `3.13` out of the box because of `cadquery` & `vtk` wheel constraints).
-- **Frontend App**: standard npm `package.json` for Vite and Three.js running within `viewer/web/`.
+- **Frontend App**: standard npm `package.json` for Vite and Three.js running within `engine/viewer/web/`.

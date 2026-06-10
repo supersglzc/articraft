@@ -46,7 +46,7 @@ uv run articraft data hydrate --all
 ```
 
 ### 3. Add API Keys
-Open `.env` and set one or more provider keys (e.g. `OPENAI_API_KEY`, `GEMINI_API_KEYS`, `ANTHROPIC_API_KEYS`, `DASHSCOPE_API_KEY`).
+Open `.env` and set `GEMINI_API_KEYS` (comma-separated for key rotation, or a single key). Gemini is the only supported LLM backend; the Vertex backend works too via `GOOGLE_CLOUD_PROJECT` / `GOOGLE_APPLICATION_CREDENTIALS` / `GOOGLE_CLOUD_LOCATION`.
 
 > **No API Keys?** No problem. You can use external AI agents like Claude Code, Codex, or Cursor instead. For Codex setup, including how to add the Codex plugin, see [Codex Plugin Setup](docs/codex_plugin.md). Then point the agent at this repository and prompt it:
 > 
@@ -59,7 +59,7 @@ Generate your first model directly from a prompt using `articraft generate`:
 uv run articraft generate "Create a realistic articulated desk lamp with a weighted base, two hinged arms, and an adjustable lamp head."
 ```
 
-If you specify no overrides, it uses `ARTICRAFT_MODEL` and `ARTICRAFT_THINKING_LEVEL` from `.env` when present, otherwise `--model gpt-5.5-2026-04-23 --thinking-level high`. You can change models and caps:
+If you specify no overrides, it uses `ARTICRAFT_MODEL` and `ARTICRAFT_THINKING_LEVEL` from `.env` when present, otherwise `--model gemini-3.5-flash --thinking-level high`. You can change models and caps:
 ```bash
 uv run articraft generate --max-cost-usd 1.5 "Create a compact desk fan with adjustable tilt."
 ```
@@ -98,7 +98,6 @@ By contributing data to the Articraft project, you acknowledge and agree that yo
 ## Documentation & Advanced Usage
 
 - **[Architecture & Project Structure](docs/architecture.md)**
-- **[Qwen / DashScope Quickstart](docs/qwen_dashscope_quickstart.md)**
 - **[Codex Plugin Setup](docs/codex_plugin.md)**
 - **[Editing Existing Records](docs/record_editing.md)**
 - **[Image-Conditioned Generation](docs/image_conditioned_generation.md)**

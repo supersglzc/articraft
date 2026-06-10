@@ -4,11 +4,11 @@ Thank you for your interest in improving Articraft! We welcome contributions fro
 
 ## Getting Started
 
-1. **Architecture & Project Layout:** To understand how the repository is structured, please read the [Architecture Guide](docs/architecture.md). It explains `agent/`, `storage/`, `sdk/`, `viewer/`, and more.
+1. **Architecture & Project Layout:** To understand how the repository is structured, please read the [Architecture Guide](docs/architecture.md). It explains `engine/` (agent, storage, cli, viewer), `sdk/`, and more.
 2. **Setup:** If you haven't yet, bootstrap your dev environment from the root:
     ```bash
     uv sync --group dev
-    npm --prefix viewer/web ci
+    npm --prefix engine/viewer/web ci
     just hooks-install
     ```
     If your pre-push hook stalls while opening a PR, rerun `just hooks-install` to restore the managed hook and local LFS push settings.
@@ -30,9 +30,9 @@ Tests use `pytest`. We prioritize fast import time, robust validation over britt
 ### Frontend Development
 The viewer uses React, TypeScript, Tailwind CSS v4, shadcn/ui, and Three.js. Strict TypeScript and ESLint checks are enforced for the web interface.
 ```bash
-npm --prefix viewer/web run dev        # start Vite for frontend dev
-npm --prefix viewer/web run typecheck  # run TSC
-npm --prefix viewer/web run lint       # run ESLint
+npm --prefix engine/viewer/web run dev        # start Vite for frontend dev
+npm --prefix engine/viewer/web run typecheck  # run TSC
+npm --prefix engine/viewer/web run lint       # run ESLint
 ```
 
 ## Creating a Pull Request
@@ -43,8 +43,8 @@ When submitting a PR, keep changes scoped to one logical addition or fix:
 1. Try to run the fastest checks prior to pushing:
    ```bash
    just smoke-tests
-   npm --prefix viewer/web run typecheck
-   npm --prefix viewer/web run lint
+   npm --prefix engine/viewer/web run typecheck
+   npm --prefix engine/viewer/web run lint
    ```
 2. For broader Python changes run `just test-all`.
 

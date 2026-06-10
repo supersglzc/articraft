@@ -17,8 +17,8 @@ You can also set `ARTICRAFT_CODEX_MODEL=<codex-model-id>` instead of passing `--
 Before you create or edit a record, read the core Articraft authoring requirements:
 
 ```text
-agent/prompts/sections/designer_common.md
-agent/prompts/sections/link_naming.md
+engine/agent/prompts/sections/designer_common.md
+engine/agent/prompts/sections/link_naming.md
 ```
 
 These define the non-negotiable quality bar: realistic geometry, primary user-facing articulation, no floating parts, no unintentional overlaps, prompt-specific tests, and concise semantic link names.

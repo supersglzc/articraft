@@ -27,7 +27,7 @@ Each row is one dataset generation job.
 | `category_slug` | Yes | Dataset category slug. |
 | `category_title` | Sometimes | Required for any row whose `category_slug` does not already exist. |
 | `prompt` | Yes | The generation prompt. |
-| `provider` | Yes | `openai`, `gemini`, `anthropic`, `dashscope`, `deepseek`, `openrouter`, or `codex-cli`. |
+| `provider` | Yes | `gemini` (the only supported LLM backend). |
 | `model_id` | Yes | Model to use. Must agree with `provider` except `codex-cli`, which accepts Codex CLI model IDs. |
 | `thinking_level` | Yes | `low`, `med`, `high`, or `xhigh`. |
 | `max_turns` | Yes | Positive integer turn cap. |

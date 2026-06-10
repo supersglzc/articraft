@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Is
 
-Articraft is an agentic system that generates articulated 3D objects from text prompts and reference images. It includes a custom articulated-object SDK, a multi-turn generation harness with tool use, provider adapters for OpenAI, Gemini, Anthropic, and OpenRouter, canonical local storage/dataset tooling, and a web-based Three.js viewer.
+Articraft is an agentic system that generates articulated 3D objects from text prompts and reference images. It includes a custom articulated-object SDK, a multi-turn generation harness with tool use, a Gemini LLM adapter, canonical local storage/dataset tooling, and a web-based Three.js viewer. (This branch is Gemini-only; see `REFACTOR_NOTES.md`.)
 
 The SDK docs under `sdk/_docs/` are part of the agent authoring contract. Keep them aligned with intended agent behavior and baseline compile/tooling policy; do not document workflows there that the harness is supposed to own automatically.
 
@@ -73,33 +73,35 @@ Viewer/frontend workflows:
 uv run articraft compile-all
 just viewer
 just viewer-dev
-uv run uvicorn viewer.api.app:app --reload --host 127.0.0.1 --port 8765
-npm --prefix viewer/web run dev
-npm --prefix viewer/web run build
-npm --prefix viewer/web run lint
-npm --prefix viewer/web run typecheck
+uv run uvicorn engine.viewer.api.app:app --reload --host 127.0.0.1 --port 8765
+npm --prefix engine/viewer/web run dev
+npm --prefix engine/viewer/web run build
+npm --prefix engine/viewer/web run lint
+npm --prefix engine/viewer/web run typecheck
 ```
 
 ## Architecture
 
-### Package Layout
+The repo is split into a domain-agnostic **engine** and one or more **generators**. See `GENERATORS.md` for the full layout and how to add a generator.
 
-- `agent/` - Generation runtime. `runner.py` provides compatibility entry points, `single_run.py` and `harness.py` orchestrate the multi-turn LLM loop, `compiler.py` executes generated `model.py` files and materializes URDF/mesh outputs, `providers/` contains OpenAI/Gemini/Anthropic/OpenRouter adapters, `tools/` defines tool schemas, `prompts/` manages provider/profile prompt docs, and `tui/` handles terminal displays.
-- `agent/batch_runner.py` - Dataset batch orchestration for tracked CSV specs. It validates rows, preallocates collision-resistant dataset/record IDs, runs rows concurrently, handles resume state, and writes batch run cache entries.
-- `sdk/` - Generated object SDK. `sdk/v0/` is the public import surface; `sdk/_core/` owns shared geometry/export logic; `sdk/_docs/` and `sdk/_examples/` are loaded into agent authoring context.
-- `storage/` - Canonical on-disk data layer. It owns layout, record/category/dataset/run stores, batch specs, materialization metadata, data validation, manifests, record author sync, and the SQLite-backed search index.
-- `viewer/` - Local inspection tool. `viewer/api/` is FastAPI, and `viewer/web/` is a React + TypeScript + Tailwind + Three.js SPA using shadcn/ui components.
-- `cli/` - Top-level `articraft` command.
+- `engine/` - Shared, domain-agnostic runtime. Subpackages:
+  - `engine/agent/` - Generation runtime. `runner.py` provides compatibility entry points, `single_run.py` and `harness.py` orchestrate the multi-turn LLM loop, `compiler.py` executes generated `model.py` files and materializes URDF/mesh outputs, `providers/` contains the Gemini adapter, `tools/` defines tool schemas, `prompts/` manages prompt docs, and `tui/` handles terminal displays.
+  - `engine/agent/batch_runner.py` - Dataset batch orchestration for tracked CSV specs. It validates rows, preallocates collision-resistant dataset/record IDs, runs rows concurrently, handles resume state, and writes batch run cache entries.
+  - `engine/storage/` - Canonical on-disk data layer. It owns layout, record/category/dataset/run stores, batch specs, materialization metadata, data validation, manifests, record author sync, and the JSON-backed search index.
+  - `engine/viewer/` - Local inspection tool. `engine/viewer/api/` is FastAPI, and `engine/viewer/web/` is a React + TypeScript + Tailwind + Three.js SPA using shadcn/ui components.
+  - `engine/cli/` - Top-level `articraft` command.
+  - `engine/articraft/` - Shared config and value enums (env defaults, provider/thinking levels).
+- `sdk/` - The "articulated" generator (stays a top-level package because generated `model.py` does `import sdk`). `sdk/v0/` is the public import surface; `sdk/_core/` owns shared geometry/export logic; `sdk/scaffold.py` is the starting model; `sdk/_profiles.py` registers the generator; `sdk/_docs/` and `sdk/_examples/` are loaded into agent authoring context.
 - `tests/` - pytest tests mirroring package structure.
 
 ### Data Flow
 
 1. Prompt/reference image enters `articraft generate`, `dataset run`, or a batch row.
 2. The generation harness builds provider-specific requests, runs a multi-turn tool loop, and writes generated `model.py`.
-3. `agent/compiler.py` executes `model.py` and exports URDF/mesh artifacts.
+3. `engine/agent/compiler.py` executes `model.py` and exports URDF/mesh artifacts.
 4. Canonical record data is persisted under `data/records/<record_id>/` with `record.json`, revision artifacts under `revisions/<revision_id>/`, and optional collection sidecars under `collections/`.
 5. Regenerable materialization outputs are stored under `data/cache/record_materialization/<record_id>/`.
-6. `viewer/api` serves records and cached artifacts; `viewer/web` renders and manages them.
+6. `engine/viewer/api` serves records and cached artifacts; `engine/viewer/web` renders and manages them.
 
 ### Storage Layout
 
@@ -135,7 +137,7 @@ Recommended/optional columns:
 
 Validation rules:
 
-- `provider` must be `openai`, `gemini`, `anthropic`, or `openrouter`.
+- `provider` must be `gemini` (the only supported LLM backend).
 - `model_id` must agree with the inferred provider when inference is possible.
 - `thinking_level` must be `low`, `med`, `high`, or `xhigh`.
 - `max_turns` must be a positive integer.
@@ -150,14 +152,14 @@ Resume uses the same `batch_spec_id`, stable `row_id` values, prior allocations 
 - Use `uv run articraft compile-all --target full` when collision-inclusive URDFs are needed in bulk.
 - Add `--strict` only when validation-heavy geometry checks should fail the bulk compile.
 - Use `uv run articraft compile data/records/<id>` for one-off full record recompiles; add `--target visual` for viewer-only assets.
-- `just viewer` builds `viewer/web` and serves it through FastAPI on `127.0.0.1:8765`.
+- `just viewer` builds `engine/viewer/web` and serves it through FastAPI on `127.0.0.1:8765`.
 - `just viewer-dev` starts uvicorn plus the Vite dev server, with Vite on `:5173` proxying API requests to `:8765`.
 
 ## Code Style
 
 - Python: target Python 3.11+; `.python-version` pins 3.12 locally and the project excludes Python 3.13. Use 4-space indentation, `from __future__ import annotations`, explicit type hints, and minimal imports.
 - Ruff is configured in `pyproject.toml`: line length 100, target `py311`, lint rules `E`, `F`, `I`, ignoring `E501`. Use `just format` and `just lint` or the underlying `uv run ruff ...` commands.
-- TypeScript/React: strict TypeScript, ESLint, Tailwind CSS v4 via Vite, shadcn/ui, and the `@/` alias for `viewer/web/src`.
+- TypeScript/React: strict TypeScript, ESLint, Tailwind CSS v4 via Vite, shadcn/ui, and the `@/` alias for `engine/viewer/web/src`.
 - Follow local patterns before adding new abstractions; keep changes scoped to the relevant surface.
 
 ## Hooks and Commit Safety
@@ -168,16 +170,14 @@ Blocked paths include `.env`, `data/cache/`, `data/local/`, workbench-only recor
 
 ## Environment
 
-Provider keys go in `.env`:
+Gemini credentials go in `.env`:
 
-- `OPENAI_API_KEYS` or `OPENAI_API_KEY`
-- `GEMINI_API_KEYS`
-- `ANTHROPIC_API_KEYS` or `ANTHROPIC_API_KEY`
-- `OPENROUTER_API_KEYS` or `OPENROUTER_API_KEY`
+- `GEMINI_API_KEYS` (comma-separated for key rotation, or a single key)
+- Or the Vertex backend: `GOOGLE_CLOUD_PROJECT`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_LOCATION`
 
-Optional defaults include `ARTICRAFT_MODEL` for the default generation model, `ARTICRAFT_THINKING_LEVEL` for the default thinking level, `ARTICRAFT_MAX_COST_USD` for per-run budgets, and provider-specific knobs such as OpenAI transport/cache settings, Anthropic cache settings, and OpenRouter token/retry settings.
+Optional defaults include `ARTICRAFT_MODEL` for the default generation model, `ARTICRAFT_THINKING_LEVEL` for the default thinking level, and `ARTICRAFT_MAX_COST_USD` for per-run budgets. Gemini knobs (timeout, retries, prefix cache, thought inclusion) are read from `GEMINI_*` env vars.
 
-`articraft generate` uses `ARTICRAFT_MODEL` and `ARTICRAFT_THINKING_LEVEL` from `.env` when present; otherwise it defaults to `gpt-5.5-2026-04-23` with `--thinking-level high`. Provider inference handles known OpenAI, Gemini, Claude, and OpenRouter-style model IDs; pass `--provider` explicitly when using an ambiguous model name.
+`articraft generate` uses `ARTICRAFT_MODEL` and `ARTICRAFT_THINKING_LEVEL` from `.env` when present; otherwise it defaults to `gemini-3.5-flash` with `--thinking-level high`. Gemini is the only provider.
 
 ## Paper Dataset Counts
 
