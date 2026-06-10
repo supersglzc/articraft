@@ -1,16 +1,19 @@
+"""Generator profiles.
+
+A profile bundles everything that makes one *generator* (one authoring domain):
+its SDK package name, the scaffold template, the docs that get mounted into the
+agent's virtual workspace, and the designer system prompt. The runtime
+(harness/compiler/storage) is domain-agnostic and reads only this profile, so a
+second generator (e.g. rigid-body) is added by registering another profile here.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from articraft.values import ProviderName, normalize_provider_name
-
-OPENAI_DESIGNER_PROMPT_NAME = "designer_system_prompt_openai.txt"
-CODEX_CLI_DESIGNER_PROMPT_NAME = "designer_system_prompt_codex_cli.txt"
-GEMINI_DESIGNER_PROMPT_NAME = "designer_system_prompt_gemini.txt"
-OPENROUTER_DESIGNER_PROMPT_NAME = "designer_system_prompt_openrouter.txt"
-ANTHROPIC_DESIGNER_PROMPT_NAME = "designer_system_prompt_anthropic.txt"
-DEEPSEEK_DESIGNER_PROMPT_NAME = "designer_system_prompt_deepseek.txt"
+# Single Gemini designer prompt (this project is Gemini-only).
+DESIGNER_PROMPT_NAME = "designer_system_prompt_gemini.txt"
 
 
 @dataclass(slots=True, frozen=True)
@@ -19,12 +22,7 @@ class SdkProfile:
     scaffold_path: Path
     docs_full: tuple[Path, ...]
     docs_core: tuple[Path, ...]
-    openai_prompt_name: str
-    codex_cli_prompt_name: str
-    gemini_prompt_name: str
-    openrouter_prompt_name: str
-    anthropic_prompt_name: str
-    deepseek_prompt_name: str
+    designer_prompt_name: str
 
     def docs_for_mode(self, docs_mode: str) -> tuple[Path, ...]:
         if docs_mode == "full":
@@ -35,28 +33,9 @@ class SdkProfile:
             return ()
         raise ValueError(f"Unsupported SDK docs mode: {docs_mode!r}")
 
-    def prompt_name_for_provider(self, provider: str | None) -> str | None:
-        if not (provider or "").strip():
-            return None
-        try:
-            provider_norm = normalize_provider_name(provider)
-        except ValueError:
-            return None
-        if provider_norm is ProviderName.OPENAI:
-            return self.openai_prompt_name
-        if provider_norm is ProviderName.CODEX_CLI:
-            return self.codex_cli_prompt_name
-        if provider_norm is ProviderName.DASHSCOPE:
-            return self.openrouter_prompt_name
-        if provider_norm is ProviderName.GEMINI:
-            return self.gemini_prompt_name
-        if provider_norm is ProviderName.OPENROUTER:
-            return self.openrouter_prompt_name
-        if provider_norm is ProviderName.ANTHROPIC:
-            return self.anthropic_prompt_name
-        if provider_norm is ProviderName.DEEPSEEK:
-            return self.deepseek_prompt_name
-        return None
+    def prompt_name_for_provider(self, provider: str | None = None) -> str:
+        # Gemini is the only provider; the argument is accepted for call-site stability.
+        return self.designer_prompt_name
 
 
 _COMMON_DOCS = (
@@ -112,12 +91,7 @@ SDK_PROFILES: dict[str, SdkProfile] = {
             Path("sdk/_docs/common/70_probe_tooling.md"),
             Path("sdk/_docs/common/80_testing.md"),
         ),
-        openai_prompt_name=OPENAI_DESIGNER_PROMPT_NAME,
-        codex_cli_prompt_name=CODEX_CLI_DESIGNER_PROMPT_NAME,
-        gemini_prompt_name=GEMINI_DESIGNER_PROMPT_NAME,
-        openrouter_prompt_name=OPENROUTER_DESIGNER_PROMPT_NAME,
-        anthropic_prompt_name=ANTHROPIC_DESIGNER_PROMPT_NAME,
-        deepseek_prompt_name=DEEPSEEK_DESIGNER_PROMPT_NAME,
+        designer_prompt_name=DESIGNER_PROMPT_NAME,
     ),
 }
 

@@ -85,7 +85,7 @@ def test_workbench_fork_record_command_uses_internal_edit(
     record_dir = tmp_path / "data" / "records" / "rec_parent"
     record_dir.mkdir(parents=True)
     (record_dir / "record.json").write_text(
-        '{"record_id":"rec_parent","provider":"openai","active_revision_id":"rev_000001"}\n',
+        '{"record_id":"rec_parent","provider":"gemini","active_revision_id":"rev_000001"}\n',
         encoding="utf-8",
     )
     calls: list[dict] = []
@@ -96,7 +96,7 @@ def test_workbench_fork_record_command_uses_internal_edit(
         output_dir = tmp_path / "data" / "records" / output_record_id
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "record.json").write_text(
-            '{"record_id":"%s","provider":"openai","active_revision_id":"rev_000001"}\n'
+            '{"record_id":"%s","provider":"gemini","active_revision_id":"rev_000001"}\n'
             % output_record_id,
             encoding="utf-8",
         )
@@ -171,7 +171,7 @@ def test_workbench_rerun_record_command(
             display_prompt="make a cabinet hinge",
             repo_root=repo_root,
             image_path=None,
-            provider="openai",
+            provider="gemini",
             thinking_level="high",
             max_turns=30,
             system_prompt_path="designer_system_prompt.txt",
@@ -222,7 +222,7 @@ def test_workbench_rerun_record_command_accepts_model_and_thinking_overrides(
             display_prompt="make a countertop mixer",
             repo_root=repo_root,
             image_path=None,
-            provider="openai",
+            provider="gemini",
             model_id="gpt-5.4",
             thinking_level="high",
             max_turns=30,
@@ -281,7 +281,7 @@ def test_workbench_rerun_record_command_prefers_source_run_thinking_parameters(
             display_prompt="make a midi keyboard",
             repo_root=repo_root,
             image_path=None,
-            provider="openai",
+            provider="gemini",
             model_id="gpt-5.4",
             thinking_level="low",
             max_turns=30,
@@ -338,7 +338,7 @@ def test_workbench_rerun_record_command_accepts_sdk_override(
             display_prompt="make a microphone boom arm",
             repo_root=repo_root,
             image_path=None,
-            provider="openai",
+            provider="gemini",
             model_id="gpt-5.4",
             thinking_level="high",
             max_turns=30,
@@ -374,7 +374,7 @@ def test_workbench_rerun_record_command_accepts_sdk_override(
     assert updated_record["sdk_package"] == "sdk"
     assert updated_provenance["sdk"]["sdk_package"] == "sdk"
     assert (
-        updated_provenance["prompting"]["system_prompt_file"] == "designer_system_prompt_openai.txt"
+        updated_provenance["prompting"]["system_prompt_file"] == "designer_system_prompt_gemini.txt"
     )
 
     captured = capsys.readouterr().out
@@ -395,7 +395,7 @@ def test_workbench_rerun_record_command_ignores_legacy_sdk_docs_mode(
             display_prompt="make a coffee machine",
             repo_root=repo_root,
             image_path=None,
-            provider="openai",
+            provider="gemini",
             thinking_level="high",
             max_turns=30,
             system_prompt_path="designer_system_prompt.txt",
@@ -443,7 +443,7 @@ def test_workbench_rerun_record_command_replaces_cached_materialization_outputs(
             display_prompt="make a remote turret",
             repo_root=repo_root,
             image_path=None,
-            provider="openai",
+            provider="gemini",
             thinking_level="high",
             max_turns=30,
             system_prompt_path="designer_system_prompt.txt",
@@ -499,7 +499,7 @@ def test_workbench_init_record_command(
                 "init-record",
                 "build a folding reading lamp",
                 "--provider",
-                "openai",
+                "gemini",
                 "--model-id",
                 "gpt-5.4",
                 "--thinking-level",
@@ -524,7 +524,7 @@ def test_workbench_init_record_command(
     record = json.loads((record_dir / "record.json").read_text(encoding="utf-8"))
     assert record["record_id"] == record_dir.name
     assert record["kind"] == "draft_model"
-    assert record["provider"] == "openai"
+    assert record["provider"] == "gemini"
     assert record["model_id"] == "gpt-5.4"
     assert record["collections"] == ["workbench"]
     assert record["display"]["title"] == "reading lamp draft"
@@ -543,7 +543,7 @@ def test_workbench_init_record_command(
     provenance = json.loads(
         _artifact_path(record_dir, "provenance.json").read_text(encoding="utf-8")
     )
-    assert provenance["generation"]["provider"] == "openai"
+    assert provenance["generation"]["provider"] == "gemini"
     assert provenance["generation"]["model_id"] == "gpt-5.4"
     assert provenance["generation"]["max_turns"] == DEFAULT_MAX_TURNS
     assert provenance["generation"]["max_cost_usd"] == 2.5
@@ -607,7 +607,7 @@ def test_workbench_rerun_record_command_reuses_stored_max_cost_usd_and_accepts_o
             display_prompt="make a coffee machine",
             repo_root=repo_root,
             image_path=None,
-            provider="openai",
+            provider="gemini",
             thinking_level="high",
             max_turns=30,
             max_cost_usd=2.5,
@@ -671,7 +671,7 @@ def test_workbench_init_record_command_uses_single_scaffold(
                 "init-record",
                 "build a folding reading lamp",
                 "--provider",
-                "openai",
+                "gemini",
                 "--model-id",
                 "gpt-5.4",
                 "--thinking-level",
@@ -704,7 +704,7 @@ def test_workbench_init_record_command_persists_input_image(
                 "init-record",
                 "build a folding reading lamp",
                 "--provider",
-                "openai",
+                "gemini",
                 "--image",
                 str(image_path),
             ]
@@ -720,7 +720,7 @@ def test_workbench_init_record_command_persists_input_image(
         _active_revision_dir(record_dir) / "inputs" / image_path.name
     ).read_bytes() == image_path.read_bytes()
     record = json.loads((record_dir / "record.json").read_text(encoding="utf-8"))
-    assert record["model_id"] == "gpt-5.5-2026-04-23"
+    assert record["model_id"] == "gemini-3.5-flash"
 
     captured = capsys.readouterr().out
     assert f"initialized record_id={record_dir.name}" in captured
@@ -739,7 +739,7 @@ def test_workbench_init_record_does_not_warn_when_post_commit_hook_missing(tmp_p
                     "init-record",
                     "build a folding reading lamp",
                     "--provider",
-                    "openai",
+                    "gemini",
                 ]
             )
             == 0
@@ -762,7 +762,7 @@ def test_workbench_rerun_record_does_not_warn_when_post_commit_hook_missing(
             display_prompt="make a cabinet hinge",
             repo_root=repo_root,
             image_path=None,
-            provider="openai",
+            provider="gemini",
             thinking_level="high",
             max_turns=30,
             system_prompt_path="designer_system_prompt.txt",
@@ -796,7 +796,7 @@ def test_workbench_init_record_does_not_warn_when_post_commit_hook_installed(
                     "init-record",
                     "build a folding reading lamp",
                     "--provider",
-                    "openai",
+                    "gemini",
                 ]
             )
             == 0

@@ -6,7 +6,6 @@ from typing import Any
 
 from agent.prompts import normalize_sdk_package
 from agent.runtime_limits import BatchRuntimeLimits
-from agent.tools.apply_patch import ApplyPatchFreeformTool, ApplyPatchJsonTool
 from agent.tools.base import (
     BaseDeclarativeTool,
     BaseToolInvocation,
@@ -21,45 +20,15 @@ from agent.tools.probe_model import ProbeModelTool
 from agent.tools.read_file import ReadFileTool
 from agent.tools.registry import ToolRegistry
 from agent.tools.write_code import WriteFileTool
-from articraft.values import ProviderName, normalize_provider_name
+from articraft.values import ProviderName
 
 SUPPORTED_IMAGE_MIME_TYPES_BY_PROVIDER: dict[str, set[str]] = {
-    ProviderName.ANTHROPIC.value: {
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-        "image/gif",
-    },
-    ProviderName.DASHSCOPE.value: {
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-        "image/gif",
-    },
-    ProviderName.OPENAI.value: {
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-        "image/gif",
-    },
-    ProviderName.CODEX_CLI.value: {
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-        "image/gif",
-    },
     ProviderName.GEMINI.value: {
         "image/png",
         "image/jpeg",
         "image/webp",
         "image/heic",
         "image/heif",
-    },
-    ProviderName.OPENROUTER.value: {
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-        "image/gif",
     },
 }
 
@@ -75,40 +44,21 @@ _FIRST_TURN_RUNTIME_GUIDANCE_SHARED = (
 
 
 def build_tool_registry(
-    provider: str,
+    provider: str = ProviderName.GEMINI.value,
     *,
     sdk_package: str = "sdk",
     runtime_limits: BatchRuntimeLimits | None = None,
 ) -> ToolRegistry:
-    provider_norm = normalize_provider_name(provider)
+    # Gemini tool set: edit via replace/write_file, plus compile/probe/find_examples.
     package = normalize_sdk_package(sdk_package)
-    if provider_norm is ProviderName.OPENAI:
-        tools: list[BaseDeclarativeTool] = [
-            ReadFileTool(),
-            ApplyPatchFreeformTool(),
-            CompileModelTool(),
-            ProbeModelTool(sdk_package=package, runtime_limits=runtime_limits),
-        ]
-    elif provider_norm is ProviderName.CODEX_CLI:
-        tools = [
-            ReadFileTool(editable_model_only=True),
-            ApplyPatchJsonTool(),
-            ReplaceTool(),
-            WriteFileTool(),
-            CompileModelTool(),
-            ProbeModelTool(sdk_package=package, runtime_limits=runtime_limits),
-        ]
-    else:
-        tools = [
-            ReadFileTool(editable_model_only=True),
-            ReplaceTool(),
-            WriteFileTool(),
-            CompileModelTool(),
-            ProbeModelTool(sdk_package=package, runtime_limits=runtime_limits),
-        ]
-    tools.append(
-        FindExamplesTool(sdk_package=package, include_paths=provider_norm is ProviderName.OPENAI)
-    )
+    tools: list[BaseDeclarativeTool] = [
+        ReadFileTool(editable_model_only=True),
+        ReplaceTool(),
+        WriteFileTool(),
+        CompileModelTool(),
+        ProbeModelTool(sdk_package=package, runtime_limits=runtime_limits),
+        FindExamplesTool(sdk_package=package, include_paths=False),
+    ]
     return ToolRegistry(tools)
 
 
@@ -195,24 +145,18 @@ def resolve_image_path(
         raise ValueError(f"Image path is not a file: {path}")
 
     mime_type, _ = mimetypes.guess_type(path.name)
-    provider_norm = normalize_provider_name(provider)
-    supported_mime_types = SUPPORTED_IMAGE_MIME_TYPES_BY_PROVIDER.get(provider_norm.value)
-    if supported_mime_types is None:
-        raise ValueError(f"Unsupported provider for image validation: {provider}")
+    supported_mime_types = SUPPORTED_IMAGE_MIME_TYPES_BY_PROVIDER[ProviderName.GEMINI.value]
     if mime_type not in supported_mime_types:
         raise ValueError(
-            f"Unsupported image type for {provider_norm.value}: {path.name} ({mime_type or 'unknown'})"
+            f"Unsupported image type for Gemini: {path.name} ({mime_type or 'unknown'})"
         )
 
     size_bytes = path.stat().st_size
-    if provider_norm is ProviderName.GEMINI:
-        if size_bytes >= 20 * 1024 * 1024:
-            raise ValueError(
-                f"Image file exceeds Gemini inline request limit: {path} "
-                "(must stay under 20 MB including prompt text)"
-            )
-    elif size_bytes > 50 * 1024 * 1024:
-        raise ValueError(f"Image file exceeds 50 MB request limit: {path}")
+    if size_bytes >= 20 * 1024 * 1024:
+        raise ValueError(
+            f"Image file exceeds Gemini inline request limit: {path} "
+            "(must stay under 20 MB including prompt text)"
+        )
 
     return path
 
@@ -223,8 +167,6 @@ __all__ = [
     "ToolResult",
     "ToolSchema",
     "make_tool_schema",
-    "ApplyPatchFreeformTool",
-    "ApplyPatchJsonTool",
     "CompileModelTool",
     "FindExamplesTool",
     "ProbeModelTool",

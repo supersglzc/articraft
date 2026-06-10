@@ -27,20 +27,8 @@ from agent.prompts import (
 from agent.prompts import (
     normalize_sdk_package as _normalize_sdk_package,
 )
-from agent.providers.anthropic import AnthropicLLM
 from agent.providers.base import ProviderClient
-from agent.providers.codex_cli import CodexCliLLM
-from agent.providers.dashscope import DashScopeLLM
-from agent.providers.deepseek import DeepSeekLLM
-from agent.providers.factory import (
-    ProviderConfig,
-    ProviderConstructors,
-    create_provider_client,
-    normalize_provider_name,
-)
-from agent.providers.gemini import GeminiLLM
-from agent.providers.openai import OpenAILLM
-from agent.providers.openrouter import OpenRouterLLM
+from agent.providers.gemini import DEFAULT_GEMINI_MODEL, GeminiLLM
 from agent.runtime_limits import BatchRuntimeLimits, local_work_slot
 from agent.tools import (
     build_first_turn_messages as _build_first_turn_messages,
@@ -53,6 +41,7 @@ from agent.tools.code_region import extract_editable_code
 from agent.traces import TraceWriter
 from agent.tui.single_run import SingleRunDisplay
 from agent.workspace_docs import build_virtual_workspace
+from articraft.config import default_model_from_env
 from articraft.values import ProviderName
 from sdk._profiles import get_sdk_profile
 
@@ -214,8 +203,8 @@ class ArticraftAgent:
             TraceWriter(Path(trace_dir)) if trace_dir else None
         )
 
-        provider_norm = normalize_provider_name(provider)
-        self.provider = provider_norm
+        # Gemini is the only supported provider.
+        self.provider = ProviderName.GEMINI.value
         self.message_codec = MessageCodec(provider=self.provider)
         self.compile_feedback = CompileFeedbackLoop(
             file_path=self.file_path,
@@ -229,35 +218,21 @@ class ArticraftAgent:
             trace_writer=self.trace_writer,
             tool_call_name=self.message_codec.tool_call_name,
         )
-        self.llm: ProviderClient = create_provider_client(
-            ProviderConfig(
-                provider=provider_norm,
-                model_id=model_id,
-                thinking_level=thinking_level,
-                openai_transport=openai_transport,
-                openai_reasoning_summary=openai_reasoning_summary,
-            ),
-            constructors=ProviderConstructors(
-                anthropic=AnthropicLLM,
-                codex_cli=CodexCliLLM,
-                dashscope=DashScopeLLM,
-                deepseek=DeepSeekLLM,
-                gemini=GeminiLLM,
-                openai=OpenAILLM,
-                openrouter=OpenRouterLLM,
-            ),
+        self.llm: ProviderClient = GeminiLLM(
+            model_id=model_id or default_model_from_env() or DEFAULT_GEMINI_MODEL,
+            thinking_level=thinking_level,
         )
 
         actual_model_id = self.llm.model_id
         self.max_turns = resolve_max_turns(model_id=actual_model_id, max_turns=max_turns)
         self.cost_tracker: Optional[CostTracker] = None
         self.max_cost_usd = max_cost_usd
-        pricing = pricing_for_provider_model(provider_norm, actual_model_id)
+        pricing = pricing_for_provider_model(self.provider, actual_model_id)
         if pricing:
             self.cost_tracker = CostTracker(model_id=actual_model_id, pricing=pricing)
 
         self.tool_registry = build_tool_registry(
-            provider_norm,
+            self.provider,
             sdk_package=self.sdk_package,
             runtime_limits=self.runtime_limits,
         )
@@ -290,16 +265,6 @@ class ArticraftAgent:
             repo_root,
             sdk_package=self.sdk_package,
         )
-        if self.provider == ProviderName.OPENAI.value:
-            prompt_cache_key, prompt_cache_retention = build_openai_prompt_cache_settings(
-                model_id=actual_model_id,
-                sdk_package=self.sdk_package,
-                system_prompt=self.system_prompt,
-                sdk_docs_context=self.sdk_docs_context,
-                tools=self.tool_registry.get_tool_schemas(),
-            )
-            self.llm.prompt_cache_key = prompt_cache_key
-            self.llm.prompt_cache_retention = prompt_cache_retention
 
     def _ensure_message_codec(self) -> MessageCodec:
         codec = getattr(self, "message_codec", None)

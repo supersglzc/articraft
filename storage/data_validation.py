@@ -27,7 +27,18 @@ from storage.revisions import (
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 _ALLOWED_COLLECTIONS = {"dataset", "workbench"}
 _ALLOWED_PROMPT_KINDS = {"single_prompt", "prompt_series"}
-_ALLOWED_PROVIDERS = PROVIDER_VALUE_SET
+# Runtime generation is Gemini-only, but the dataset contains historical records
+# authored with other providers. Data validation stays lenient about provider so
+# `articraft data check` keeps accepting those records. New runs are constrained to
+# Gemini at run time (see PROVIDER_VALUE_SET usage in the agent runtime).
+_ALLOWED_PROVIDERS = PROVIDER_VALUE_SET | {
+    "openai",
+    "anthropic",
+    "openrouter",
+    "deepseek",
+    "dashscope",
+    "codex-cli",
+}
 _ALLOWED_THINKING_LEVELS = THINKING_LEVEL_VALUE_SET
 _ALLOWED_CREATOR_MODES = {"internal_agent", "external_agent"}
 _ALLOWED_EXTERNAL_AGENTS = {"codex", "claude-code", "cursor"}

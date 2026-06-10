@@ -227,16 +227,15 @@ def _default_model_id(
     provider: str,
     model_id: str | None,
     thinking_level: str,
-    openai_transport: str,
-    openai_reasoning_summary: str | None,
+    openai_transport: str = "http",
+    openai_reasoning_summary: str | None = "auto",
 ) -> str:
+    # openai_* args are accepted for call-site stability but unused (Gemini-only).
     return default_model_id(
         ProviderConfig(
             provider=provider,
             model_id=model_id,
             thinking_level=thinking_level,
-            openai_transport=openai_transport,
-            openai_reasoning_summary=openai_reasoning_summary,
         )
     )
 

@@ -613,7 +613,6 @@ def test_run_accepts_gemini_replace_without_allow_multiple(
     ("provider_name", "provider_attr"),
     [
         ("gemini", "GeminiLLM"),
-        ("openai", "OpenAILLM"),
     ],
 )
 def test_finish_attempts_share_compile_gate(
@@ -834,7 +833,7 @@ def test_no_action_response_fails_fast_after_streak(
         async def close(self) -> None:
             return None
 
-    monkeypatch.setattr(harness, "OpenAILLM", _NoActionLLM)
+    monkeypatch.setattr(harness, "GeminiLLM", _NoActionLLM)
     agent = ArticraftAgent(
         file_path=str(tmp_path / "model.py"),
         provider="openai",
@@ -900,7 +899,7 @@ def test_provider_diagnostics_are_traced_without_changing_no_action_flow(
             return None
 
     trace_dir = tmp_path / "traces"
-    monkeypatch.setattr(harness, "OpenAILLM", _DiagnosticLLM)
+    monkeypatch.setattr(harness, "GeminiLLM", _DiagnosticLLM)
     agent = ArticraftAgent(
         file_path=str(tmp_path / "model.py"),
         provider="openai",
@@ -926,7 +925,7 @@ def test_provider_diagnostics_are_traced_without_changing_no_action_flow(
         {
             "ts": llm_response_events[0]["ts"],
             "type": "llm_response",
-            "provider": "openai",
+            "provider": "gemini",
             "model_id": "gpt-5.5",
             "diagnostics": diagnostics,
         }
@@ -982,7 +981,7 @@ def test_no_action_fail_fast_includes_last_provider_status(
         async def close(self) -> None:
             return None
 
-    monkeypatch.setattr(harness, "OpenAILLM", _NoActionDiagnosticLLM)
+    monkeypatch.setattr(harness, "GeminiLLM", _NoActionDiagnosticLLM)
     agent = ArticraftAgent(
         file_path=str(tmp_path / "model.py"),
         provider="openai",
@@ -1041,7 +1040,7 @@ def test_fresh_code_no_action_requires_visible_final_response(
         signal_bundle=build_compile_signal_bundle(status="success"),
     )
 
-    monkeypatch.setattr(harness, "OpenAILLM", _SequenceLLM)
+    monkeypatch.setattr(harness, "GeminiLLM", _SequenceLLM)
     agent = ArticraftAgent(
         file_path=str(tmp_path / "model.py"),
         provider="openai",

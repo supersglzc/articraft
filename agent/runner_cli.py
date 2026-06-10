@@ -30,7 +30,6 @@ from articraft.values import (
     PROVIDER_VALUES,
     THINKING_LEVEL_VALUE_SET,
     THINKING_LEVEL_VALUES,
-    ProviderName,
 )
 
 
@@ -234,10 +233,6 @@ def main(
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
-        return 1
-
-    if provider != ProviderName.OPENAI.value and args.openai_transport != "http":
-        print("--openai-transport is only supported for --provider openai.", file=sys.stderr)
         return 1
 
     repo_root = args.repo_root.resolve()

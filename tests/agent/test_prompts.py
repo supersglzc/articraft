@@ -3,10 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent.prompts import (
-    CODEX_CLI_DESIGNER_PROMPT_NAME,
     DESIGNER_PROMPT_NAME,
     GEMINI_DESIGNER_PROMPT_NAME,
-    OPENAI_DESIGNER_PROMPT_NAME,
     load_prompt_section_text,
     load_system_prompt_text,
     resolve_system_prompt_path,
@@ -21,34 +19,29 @@ from agent.tools import (
 def test_system_prompt_resolution_variants() -> None:
     repo_root = Path(__file__).resolve().parents[2]
 
+    # Gemini is the only provider; any provider resolves to the Gemini prompt.
     resolved = resolve_system_prompt_path(
         str(Path("agent/prompts/generated") / DESIGNER_PROMPT_NAME),
-        provider="openai",
+        provider="gemini",
         repo_root=repo_root,
     )
-    assert resolved.name == OPENAI_DESIGNER_PROMPT_NAME
+    assert resolved.name == GEMINI_DESIGNER_PROMPT_NAME
 
     loaded_path, loaded_text = load_system_prompt_text(
         str(Path("agent/prompts/generated") / DESIGNER_PROMPT_NAME),
-        provider="openai",
+        provider="gemini",
         repo_root=repo_root,
     )
     assert loaded_path == resolved
     assert loaded_text == resolved.read_text(encoding="utf-8")
 
-    gemini_resolved = resolve_system_prompt_path(
+    # An unknown provider still resolves to the Gemini prompt.
+    other_resolved = resolve_system_prompt_path(
         str(Path("agent/prompts/generated") / DESIGNER_PROMPT_NAME),
-        provider="gemini",
+        provider="openai",
         repo_root=repo_root,
     )
-    assert gemini_resolved.name == GEMINI_DESIGNER_PROMPT_NAME
-
-    codex_cli_resolved = resolve_system_prompt_path(
-        str(Path("agent/prompts/generated") / DESIGNER_PROMPT_NAME),
-        provider="codex-cli",
-        repo_root=repo_root,
-    )
-    assert codex_cli_resolved.name == CODEX_CLI_DESIGNER_PROMPT_NAME
+    assert other_resolved.name == GEMINI_DESIGNER_PROMPT_NAME
 
 
 def test_first_turn_runtime_guidance_is_shared() -> None:

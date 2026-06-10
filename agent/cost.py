@@ -413,36 +413,12 @@ def pricing_for_provider_model(provider: str, model_id: str) -> dict[str, float]
         provider_norm = normalize_provider_name(provider)
     except ValueError:
         return None
-    if provider_norm is ProviderName.ANTHROPIC and is_claude_opus_4_7_model(model_id):
-        return ANTHROPIC_OPUS_4_7_PRICING
-    if provider_norm is ProviderName.ANTHROPIC and is_claude_opus_4_6_model(model_id):
-        return ANTHROPIC_OPUS_4_6_PRICING
-    if provider_norm is ProviderName.ANTHROPIC and is_claude_opus_4_5_model(model_id):
-        return ANTHROPIC_OPUS_4_5_PRICING
-    if provider_norm is ProviderName.ANTHROPIC and is_claude_sonnet_4_model(model_id):
-        return ANTHROPIC_SONNET_4_PRICING
-    if provider_norm is ProviderName.ANTHROPIC and is_claude_haiku_4_5_model(model_id):
-        return ANTHROPIC_HAIKU_4_5_PRICING
     if provider_norm is ProviderName.GEMINI and is_gemini_3_5_flash_model(model_id):
         return GEMINI_3_5_FLASH_PRICING
     if provider_norm is ProviderName.GEMINI and is_flash_model(model_id):
         return GEMINI_FLASH_PRICING
     if provider_norm is ProviderName.GEMINI and is_gemini_3_pro_model(model_id):
         return GEMINI_3_PRO_PRICING
-    if provider_norm is ProviderName.OPENAI and is_gpt_5_5_model(model_id):
-        return OPENAI_GPT_5_5_PRICING
-    if provider_norm is ProviderName.OPENAI and is_gpt_5_4_model(model_id):
-        return OPENAI_GPT_5_4_PRICING
-    if provider_norm is ProviderName.OPENAI and (
-        is_gpt_5_3_codex_model(model_id) or is_gpt_5_2_model(model_id)
-    ):
-        return OPENAI_GPT_5_3_CODEX_PRICING
-    if provider_norm is ProviderName.DEEPSEEK and is_deepseek_v4_pro_model(model_id):
-        return DEEPSEEK_V4_PRO_PRICING
-    if provider_norm is ProviderName.DASHSCOPE and is_dashscope_qwen3_6_flash_model(model_id):
-        return DASHSCOPE_QWEN_3_6_FLASH_PRICING
-    if provider_norm is ProviderName.DASHSCOPE and is_dashscope_qwen3_6_plus_model(model_id):
-        return DASHSCOPE_QWEN_3_6_PLUS_PRICING
     return None
 
 

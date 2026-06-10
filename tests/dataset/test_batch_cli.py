@@ -49,7 +49,7 @@ class SuccessBatchAgent:
         *,
         file_path: str,
         trace_dir: str | None = None,
-        provider: str = "openai",
+        provider: str = "gemini",
         model_id: str | None = None,
         **_: object,
     ) -> None:
@@ -63,7 +63,7 @@ class SuccessBatchAgent:
                 repo_root=Path(__file__).resolve().parents[2],
             )
         )
-        self.llm = type("LLM", (), {"model_id": model_id or "gpt-5.5-2026-04-23"})()
+        self.llm = type("LLM", (), {"model_id": model_id or "gemini-3.5-flash"})()
 
     async def __aenter__(self) -> "SuccessBatchAgent":
         return self
@@ -226,8 +226,8 @@ def test_build_batch_config_validates_csv_rows(tmp_path: Path) -> None:
                     "row_id": "a",
                     "category_slug": "new_cat",
                     "prompt": "x",
-                    "provider": "openai",
-                    "model_id": "gpt-5.4",
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash",
                     "thinking_level": "high",
                     "max_turns": "10",
                     "sdk_package": "sdk",
@@ -242,8 +242,8 @@ def test_build_batch_config_validates_csv_rows(tmp_path: Path) -> None:
                     "category_slug": "hinge",
                     "category_title": "Hinge",
                     "prompt": "x",
-                    "provider": "openai",
-                    "model_id": "gpt-5.4",
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash",
                     "thinking_level": "high",
                     "max_turns": "10",
                     "sdk_package": "sdk",
@@ -253,8 +253,8 @@ def test_build_batch_config_validates_csv_rows(tmp_path: Path) -> None:
                     "category_slug": "hinge",
                     "category_title": "Hinge",
                     "prompt": "y",
-                    "provider": "openai",
-                    "model_id": "gpt-5.4",
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash",
                     "thinking_level": "high",
                     "max_turns": "10",
                     "sdk_package": "sdk",
@@ -267,26 +267,10 @@ def test_build_batch_config_validates_csv_rows(tmp_path: Path) -> None:
                 {
                     "row_id": "a",
                     "category_slug": "hinge",
-                    "category_title": "Hinge",
-                    "prompt": "x",
-                    "provider": "gemini",
-                    "model_id": "gpt-5.4",
-                    "thinking_level": "high",
-                    "max_turns": "10",
-                    "sdk_package": "sdk",
-                }
-            ],
-            "provider/model mismatch",
-        ),
-        (
-            [
-                {
-                    "row_id": "a",
-                    "category_slug": "hinge",
                     "category_title": "Wrong",
                     "prompt": "x",
-                    "provider": "openai",
-                    "model_id": "gpt-5.4",
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash",
                     "thinking_level": "high",
                     "max_turns": "10",
                     "sdk_package": "sdk",
@@ -301,30 +285,14 @@ def test_build_batch_config_validates_csv_rows(tmp_path: Path) -> None:
                     "category_slug": "hinge",
                     "category_title": "Hinge",
                     "prompt": "x",
-                    "provider": "openai",
-                    "model_id": "gpt-5.4",
+                    "provider": "gemini",
+                    "model_id": "gemini-3.5-flash",
                     "thinking_level": "high",
                     "max_turns": "0",
                     "sdk_package": "sdk",
                 }
             ],
             "max_turns > 0",
-        ),
-        (
-            [
-                {
-                    "row_id": "a",
-                    "category_slug": "hinge",
-                    "category_title": "Hinge",
-                    "prompt": "x",
-                    "provider": "codex-cli",
-                    "model_id": "codex-cli-default",
-                    "thinking_level": "high",
-                    "max_turns": "10",
-                    "sdk_package": "sdk",
-                }
-            ],
-            "legacy codex-cli-default",
         ),
     ]
 
@@ -347,49 +315,6 @@ def test_build_batch_config_validates_csv_rows(tmp_path: Path) -> None:
             )
 
 
-def test_build_batch_config_allows_codex_cli_openai_named_model(tmp_path: Path) -> None:
-    repo = StorageRepo(tmp_path)
-    repo.ensure_layout()
-    CategoryStore(repo).save(
-        CategoryRecord(schema_version=1, slug="hinge", title="Hinge", description="")
-    )
-
-    spec_path = tmp_path / "source_specs" / "codex_cli_batch.csv"
-    _write_csv(
-        spec_path,
-        [
-            {
-                "row_id": "a",
-                "category_slug": "hinge",
-                "category_title": "Hinge",
-                "prompt": "make hinge",
-                "provider": "codex-cli",
-                "model_id": "gpt-5.5",
-                "thinking_level": "high",
-                "max_turns": "10",
-                "sdk_package": "sdk",
-            }
-        ],
-    )
-
-    config = batch_runner.build_batch_config(
-        repo_root=tmp_path,
-        spec_arg=str(spec_path),
-        concurrency=1,
-        system_prompt_path="designer_system_prompt.txt",
-        qc_blurb_path=None,
-        resume=False,
-        resume_policy="failed_or_pending",
-        keep_awake=False,
-        pause_file=None,
-        pause_poll_seconds=1.0,
-        keyboard_pause_enabled=False,
-    )
-
-    assert config.rows[0].provider == "codex-cli"
-    assert config.rows[0].model_id == "gpt-5.5"
-
-
 def test_build_batch_config_resolves_auto_concurrency_to_logical_cpu_count(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -409,8 +334,8 @@ def test_build_batch_config_resolves_auto_concurrency_to_logical_cpu_count(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": f"make hinge {index}",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "10",
                 "sdk_package": "sdk",
@@ -453,8 +378,8 @@ def test_build_batch_config_defaults_missing_sdk_package_to_sdk(tmp_path: Path) 
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make hinge 1",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "10",
             }
@@ -497,8 +422,8 @@ def test_build_batch_config_supports_max_cost_default_and_row_overrides(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "10",
                 "max_cost_usd": "1.25",
@@ -509,8 +434,8 @@ def test_build_batch_config_supports_max_cost_default_and_row_overrides(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make another hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "10",
                 "sdk_package": "sdk",
@@ -555,8 +480,8 @@ def test_build_batch_config_rejects_invalid_max_cost_usd_value(tmp_path: Path) -
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "10",
                 "max_cost_usd": "0",
@@ -597,8 +522,8 @@ def test_build_batch_config_rejects_legacy_scaffold_mode_column(tmp_path: Path) 
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "10",
                 "sdk_package": "sdk",
@@ -639,8 +564,8 @@ def test_build_batch_config_accepts_xhigh_thinking_level(tmp_path: Path) -> None
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.5",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "xhigh",
                 "max_turns": "10",
                 "sdk_package": "sdk",
@@ -682,8 +607,8 @@ def test_run_batch_max_cost_cli_override_and_csv_override(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make a hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "max_cost_usd": "1.25",
@@ -694,8 +619,8 @@ def test_run_batch_max_cost_cli_override_and_csv_override(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make another hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",
@@ -756,8 +681,8 @@ def test_run_dataset_batch_continues_after_over_budget_row(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "expensive hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "max_cost_usd": "0.5",
@@ -768,8 +693,8 @@ def test_run_dataset_batch_continues_after_over_budget_row(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "cheap hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "max_cost_usd": "0.5",
@@ -813,8 +738,8 @@ def test_run_dataset_batch_continues_after_over_budget_row(
                 turn_count=2,
                 tool_call_count=1,
                 compile_attempt_count=0,
-                provider="openai",
-                model_id="gpt-5.4",
+                provider="gemini",
+                model_id="gemini-3.5-flash",
                 sdk_package="sdk",
             )
         (context.staging_dir / "cost.json").write_text(
@@ -831,8 +756,8 @@ def test_run_dataset_batch_continues_after_over_budget_row(
             turn_count=1,
             tool_call_count=1,
             compile_attempt_count=0,
-            provider="openai",
-            model_id="gpt-5.4",
+            provider="gemini",
+            model_id="gemini-3.5-flash",
             sdk_package="sdk",
         )
 
@@ -897,8 +822,8 @@ def test_run_batch_persists_records_and_batch_metadata(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make a hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",
@@ -942,7 +867,7 @@ def test_run_batch_persists_records_and_batch_metadata(
     run_id = run_dirs[0].name
     run_payload = repo.read_json(repo.layout.run_metadata_path(run_id))
     assert run_payload["run_mode"] == "dataset_batch"
-    assert run_payload["provider"] == "mixed"
+    assert run_payload["provider"] == "gemini"
     assert run_payload["model_id"] == "mixed"
     assert run_payload["sdk_package"] == "sdk"
     assert run_payload["batch_spec_id"] == "mixed_batch"
@@ -1039,8 +964,8 @@ def test_run_batch_resume_reuses_allocations_and_only_reruns_failed_rows(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make a hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",
@@ -1050,8 +975,8 @@ def test_run_batch_resume_reuses_allocations_and_only_reruns_failed_rows(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "retry hinge once",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",
@@ -1214,8 +1139,8 @@ def test_run_batch_resume_reconciles_durable_success_without_rerunning(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make a hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",
@@ -1301,8 +1226,8 @@ def test_run_batch_resume_reruns_interrupted_running_rows(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "retry hinge once",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",
@@ -1383,8 +1308,8 @@ def test_run_batch_unexpected_worker_exception_finalizes_cleanly(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make a hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",
@@ -1394,8 +1319,8 @@ def test_run_batch_unexpected_worker_exception_finalizes_cleanly(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "explode this row",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",
@@ -1460,8 +1385,8 @@ def test_run_batch_display_stops_after_finalization(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make a hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",
@@ -1508,8 +1433,8 @@ def test_run_batch_display_uses_single_start_path(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make a hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",
@@ -1519,8 +1444,8 @@ def test_run_batch_display_uses_single_start_path(
                 "category_slug": "hinge",
                 "category_title": "Hinge",
                 "prompt": "make another hinge",
-                "provider": "openai",
-                "model_id": "gpt-5.4",
+                "provider": "gemini",
+                "model_id": "gemini-3.5-flash",
                 "thinking_level": "high",
                 "max_turns": "12",
                 "sdk_package": "sdk",

@@ -156,7 +156,7 @@ def test_generate_uses_env_model_and_thinking_defaults(
 ) -> None:
     calls: list[list[str]] = []
     (tmp_path / ".env").write_text(
-        "ARTICRAFT_MODEL=gpt-5.5\nARTICRAFT_THINKING_LEVEL=xhigh\n",
+        "ARTICRAFT_MODEL=gemini-3.5-flash\nARTICRAFT_THINKING_LEVEL=xhigh\n",
         encoding="utf-8",
     )
 
@@ -185,84 +185,11 @@ def test_generate_uses_env_model_and_thinking_defaults(
             "--prompt",
             "make a desk lamp",
             "--provider",
-            "openai",
+            "gemini",
             "--model",
-            "gpt-5.5",
+            "gemini-3.5-flash",
             "--thinking",
             "xhigh",
-        ]
-    ]
-
-
-def test_generate_with_codex_cli_provider_requires_explicit_model(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    calls: list[list[str]] = []
-
-    def _fake_agent_runner(argv: list[str]) -> int:
-        calls.append(argv)
-        return 0
-
-    monkeypatch.setattr(articraft_cli.agent_runner, "main", _fake_agent_runner)
-    monkeypatch.delenv("ARTICRAFT_CODEX_MODEL", raising=False)
-
-    exit_code = articraft_cli.main(
-        [
-            "generate",
-            "make a folding chair",
-            "--provider",
-            "codex-cli",
-            "--repo-root",
-            str(tmp_path),
-        ]
-    )
-
-    assert exit_code == 1
-    assert calls == []
-    assert "requires an explicit model" in capsys.readouterr().out
-
-
-def test_generate_with_codex_cli_provider_accepts_explicit_model(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[list[str]] = []
-
-    def _fake_agent_runner(argv: list[str]) -> int:
-        calls.append(argv)
-        return 0
-
-    monkeypatch.setattr(articraft_cli.agent_runner, "main", _fake_agent_runner)
-    monkeypatch.delenv("ARTICRAFT_CODEX_MODEL", raising=False)
-
-    exit_code = articraft_cli.main(
-        [
-            "generate",
-            "make a folding chair",
-            "--provider",
-            "codex-cli",
-            "--model",
-            "codex/gpt-5.5",
-            "--repo-root",
-            str(tmp_path),
-        ]
-    )
-
-    assert exit_code == 0
-    assert calls == [
-        [
-            "--repo-root",
-            str(tmp_path),
-            "--prompt",
-            "make a folding chair",
-            "--provider",
-            "codex-cli",
-            "--model",
-            "codex/gpt-5.5",
-            "--thinking",
-            "high",
         ]
     ]
 
@@ -273,7 +200,7 @@ def test_generate_loads_env_defaults_from_equals_repo_root(
 ) -> None:
     calls: list[list[str]] = []
     (tmp_path / ".env").write_text(
-        "ARTICRAFT_MODEL=gpt-5.5\nARTICRAFT_THINKING_LEVEL=xhigh\n",
+        "ARTICRAFT_MODEL=gemini-3.5-flash\nARTICRAFT_THINKING_LEVEL=xhigh\n",
         encoding="utf-8",
     )
 
@@ -294,7 +221,7 @@ def test_generate_loads_env_defaults_from_equals_repo_root(
     )
 
     assert exit_code == 0
-    assert calls[0][-4:] == ["--model", "gpt-5.5", "--thinking", "xhigh"]
+    assert calls[0][-4:] == ["--model", "gemini-3.5-flash", "--thinking", "xhigh"]
 
 
 def test_generate_rejects_invalid_env_thinking_default(
@@ -324,54 +251,6 @@ def test_generate_rejects_invalid_env_thinking_default(
     assert exit_code == 1
     assert calls == []
     assert "ARTICRAFT_THINKING_LEVEL must be one of" in capsys.readouterr().out
-
-
-def test_dataset_run_uses_dashscope_model_from_env(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[list[str]] = []
-
-    def _fake_dataset(argv: list[str]) -> int:
-        calls.append(argv)
-        return 0
-
-    monkeypatch.setattr(articraft_cli.dataset_cli, "main", _fake_dataset)
-    monkeypatch.setenv("DASHSCOPE_MODEL", "qwen3.6-flash")
-
-    exit_code = articraft_cli.main(
-        [
-            "dataset",
-            "run",
-            "make a folding chair",
-            "--category-slug",
-            "folding_chair",
-            "--repo-root",
-            str(tmp_path),
-            "--provider",
-            "dashscope",
-            "--thinking",
-            "low",
-        ]
-    )
-
-    assert exit_code == 0
-    assert calls == [
-        [
-            "--repo-root",
-            str(tmp_path),
-            "run-single",
-            "make a folding chair",
-            "--category-slug",
-            "folding_chair",
-            "--provider",
-            "dashscope",
-            "--model-id",
-            "qwen3.6-flash",
-            "--thinking-level",
-            "low",
-        ]
-    ]
 
 
 def test_workbench_status_delegates_to_workbench_module(

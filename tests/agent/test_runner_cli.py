@@ -15,9 +15,7 @@ def test_runner_help_text(capsys: pytest.CaptureFixture[str]) -> None:
     help_text = capsys.readouterr().out
     assert "--prompt" in help_text
     assert "--image" in help_text
-    assert (
-        "--provider {anthropic,codex-cli,dashscope,gemini,openai,openrouter,deepseek}" in help_text
-    )
+    assert "--provider {gemini}" in help_text
     assert "--openai-transport {http,websocket}" in help_text
     assert "--collection {workbench,dataset}" in help_text
     assert "--dataset-id DATASET_ID" in help_text
@@ -57,170 +55,9 @@ def test_runner_dump_provider_payload_supports_sdk(
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
-    docs_message = payload["input"][0]["content"][0]["text"]
+    docs_message = payload["contents"][0]["parts"][0]["text"]
     assert "## docs/sdk/references/quickstart.md" in docs_message
     assert "Import from `sdk` in `model.py`." in docs_message
-
-
-def test_runner_accepts_openai_api_keys_env(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    captured: dict[str, object] = {}
-
-    async def _fake_run_from_input(*args, **kwargs) -> int:  # type: ignore[no-untyped-def]
-        captured.update(kwargs)
-        return 0
-
-    monkeypatch.setattr(runner, "run_from_input", _fake_run_from_input)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEYS", "sk-first,sk-second")
-    monkeypatch.setenv("ARTICRAFT_MAX_COST_USD", "1.25")
-    monkeypatch.setenv("ARTICRAFT_THINKING_LEVEL", "xhigh")
-
-    exit_code = runner.main(
-        [
-            "--prompt",
-            "test prompt",
-            "--provider",
-            "openai",
-            "--repo-root",
-            str(tmp_path),
-        ]
-    )
-
-    assert exit_code == 0
-    assert captured["max_cost_usd"] == 1.25
-    assert captured["thinking_level"] == "xhigh"
-
-
-def test_runner_rejects_codex_cli_without_explicit_model(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    async def _fake_run_from_input(*args, **kwargs) -> int:  # type: ignore[no-untyped-def]
-        raise AssertionError("run_from_input should not be called")
-
-    monkeypatch.setattr(runner, "run_from_input", _fake_run_from_input)
-    monkeypatch.delenv("ARTICRAFT_CODEX_MODEL", raising=False)
-
-    exit_code = runner.main(
-        [
-            "--prompt",
-            "test prompt",
-            "--provider",
-            "codex-cli",
-            "--repo-root",
-            str(tmp_path),
-        ]
-    )
-
-    assert exit_code == 1
-    assert "requires an explicit model" in capsys.readouterr().err
-
-
-def test_runner_dump_provider_payload_supports_openrouter(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    exit_code = runner.main(
-        [
-            "--prompt",
-            "test prompt",
-            "--provider",
-            "openrouter",
-            "--thinking",
-            "high",
-            "--dump-provider-payload",
-        ]
-    )
-
-    assert exit_code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["base_url"] == "https://openrouter.ai/api/v1"
-    assert payload["model"] == "tencent/hy3-preview:free"
-    assert payload["extra_body"]["reasoning"]["enabled"] is True
-    assert payload["extra_body"]["reasoning"]["effort"] == "high"
-    assert payload["messages"][0]["role"] == "system"
-    assert "<process>" in payload["messages"][0]["content"]
-    assert (
-        "Work evidence-first. Before editing, read `model.py`" in payload["messages"][0]["content"]
-    )
-    assert payload["messages"][1]["role"] == "user"
-
-
-def test_runner_dump_provider_payload_supports_dashscope(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    exit_code = runner.main(
-        [
-            "--prompt",
-            "test prompt",
-            "--provider",
-            "dashscope",
-            "--dump-provider-payload",
-        ]
-    )
-
-    assert exit_code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    assert payload["model"] == "qwen3.6-flash"
-    assert payload["extra_body"] == {"enable_thinking": True}
-    assert payload["messages"][0]["role"] == "system"
-    assert "<process>" in payload["messages"][0]["content"]
-    assert payload["messages"][1]["role"] == "user"
-
-
-def test_runner_dump_provider_payload_supports_anthropic(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    exit_code = runner.main(
-        [
-            "--prompt",
-            "test prompt",
-            "--provider",
-            "anthropic",
-            "--thinking",
-            "high",
-            "--dump-provider-payload",
-        ]
-    )
-
-    assert exit_code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["base_url"] == "https://api.anthropic.com"
-    assert payload["model"] == "claude-opus-4-7"
-    assert payload["thinking"] == {"type": "adaptive"}
-    assert payload["output_config"] == {"effort": "high"}
-    system_text = payload["system"][0]["text"]
-    assert payload["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert "<process>" in system_text
-    assert "Work evidence-first. Before editing, read `model.py`" in system_text
-    assert payload["messages"][0]["role"] == "user"
-
-
-def test_runner_dump_provider_payload_uses_openai_env_defaults(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("ARTICRAFT_MODEL", "gpt-5.5")
-    monkeypatch.setenv("ARTICRAFT_THINKING_LEVEL", "xhigh")
-
-    exit_code = runner.main(
-        [
-            "--prompt",
-            "test prompt",
-            "--provider",
-            "openai",
-            "--dump-provider-payload",
-        ]
-    )
-
-    assert exit_code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["model"] == "gpt-5.5"
-    assert payload["reasoning"]["effort"] == "xhigh"
 
 
 def test_runner_infers_provider_from_env_default_model(
@@ -300,7 +137,7 @@ def test_runner_loads_env_defaults_from_repo_root(
             "--prompt",
             "test prompt",
             "--provider",
-            "openai",
+            "gemini",
             "--repo-root",
             str(repo_root),
             "--dump-provider-payload",
@@ -310,4 +147,3 @@ def test_runner_loads_env_defaults_from_repo_root(
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["model"] == "gpt-5.5-direct-runner"
-    assert payload["reasoning"]["effort"] == "xhigh"

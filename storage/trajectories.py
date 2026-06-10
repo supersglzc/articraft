@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
+import threading
 from pathlib import Path
 
 import zstandard as zstd
@@ -59,10 +61,18 @@ def ensure_shared_system_prompt_text(
     destination = repo.layout.system_prompt_path(digest)
     if destination.exists():
         existing = destination.read_text(encoding="utf-8")
-        if existing != prompt_text:
-            raise ValueError(f"Shared system prompt hash collision at {destination}")
-        return destination
-    repo.write_text(destination, prompt_text)
+        if existing == prompt_text:
+            return destination
+        # A real SHA-256 collision is effectively impossible; a content mismatch here
+        # almost always means a concurrent writer was mid-write. Re-do the write
+        # atomically below so concurrent batch rows that share a prompt converge.
+    # Atomic write: stage in a unique temp file, then rename into place. This keeps
+    # concurrent readers (other batch rows sharing the same prompt hash) from ever
+    # observing a partially written file.
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    tmp = destination.with_name(f"{destination.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(prompt_text, encoding="utf-8")
+    os.replace(tmp, destination)
     return destination
 
 

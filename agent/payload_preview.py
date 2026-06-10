@@ -7,18 +7,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from agent.harness import build_openai_prompt_cache_settings
 from agent.prompts import load_sdk_docs_reference, load_system_prompt_text
-from agent.providers.factory import (
-    ProviderConfig,
-    create_provider_client,
-    normalize_provider_name,
-)
+from agent.providers.factory import ProviderConfig, create_provider_client
 from agent.tools import (
     build_first_turn_messages as _build_first_turn_messages,
 )
 from agent.tools import build_tool_registry
-from articraft.values import ProviderName
 
 
 def build_provider_payload_preview(
@@ -53,26 +47,11 @@ def build_provider_payload_preview(
     )
     tools = tool_registry_builder(provider, sdk_package=sdk_package).get_tool_schemas()
 
-    provider_norm = normalize_provider_name(provider)
-    prompt_cache_key: str | None = None
-    prompt_cache_retention: str | None = None
-    if provider_norm == ProviderName.OPENAI.value:
-        prompt_cache_key, prompt_cache_retention = build_openai_prompt_cache_settings(
-            model_id=model_id,
-            sdk_package=sdk_package,
-            system_prompt=system_prompt,
-            sdk_docs_context=docs,
-            tools=tools,
-        )
     llm = create_provider_client(
         ProviderConfig(
-            provider=provider_norm,
+            provider=provider,
             model_id=model_id,
             thinking_level=thinking_level,
-            openai_transport=openai_transport,
-            openai_reasoning_summary=openai_reasoning_summary,
-            openai_prompt_cache_key=prompt_cache_key,
-            openai_prompt_cache_retention=prompt_cache_retention,
         ),
         dry_run=True,
     )

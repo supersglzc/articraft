@@ -4,13 +4,8 @@ from enum import StrEnum
 
 
 class ProviderName(StrEnum):
-    ANTHROPIC = "anthropic"
-    CODEX_CLI = "codex-cli"
-    DASHSCOPE = "dashscope"
+    # Gemini is the only supported LLM backend.
     GEMINI = "gemini"
-    OPENAI = "openai"
-    OPENROUTER = "openrouter"
-    DEEPSEEK = "deepseek"
 
 
 class ThinkingLevel(StrEnum):
@@ -26,32 +21,16 @@ THINKING_LEVEL_VALUES = tuple(level.value for level in ThinkingLevel)
 THINKING_LEVEL_VALUE_SET = frozenset(THINKING_LEVEL_VALUES)
 
 
-def normalize_provider_name(provider: str | ProviderName | None) -> ProviderName:
-    value = str(provider or ProviderName.OPENAI).strip().lower()
-    try:
-        return ProviderName(value)
-    except ValueError as exc:
-        raise ValueError(f"Unsupported provider: {provider}") from exc
+def normalize_provider_name(provider: str | ProviderName | None = None) -> ProviderName:
+    """Every supported provider is Gemini."""
+    return ProviderName.GEMINI
 
 
 def infer_provider_from_model_id(model_id: str | None) -> ProviderName | None:
+    """Gemini model ids (or empty) map to Gemini; anything else returns None."""
     model_norm = (model_id or "").strip().lower()
-    if not model_norm:
-        return None
-    if model_norm.startswith(("gpt-", "o1", "o3", "o4")):
-        return ProviderName.OPENAI
-    if model_norm.startswith("claude-"):
-        return ProviderName.ANTHROPIC
-    if model_norm.startswith(("codex-cli", "codex/")):
-        return ProviderName.CODEX_CLI
-    if "/" in model_norm or model_norm.startswith("openrouter/"):
-        return ProviderName.OPENROUTER
-    if model_norm.startswith("qwen"):
-        return ProviderName.DASHSCOPE
-    if model_norm.startswith("gemini-"):
+    if not model_norm or model_norm.startswith("gemini-"):
         return ProviderName.GEMINI
-    if model_norm.startswith("deepseek-"):
-        return ProviderName.DEEPSEEK
     return None
 
 
