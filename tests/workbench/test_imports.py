@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cli.workbench import main as workbench_main
-from storage.repo import StorageRepo
+from engine.cli.workbench import main as workbench_main
+from engine.storage.repo import StorageRepo
 
 
 def test_workbench_imports() -> None:

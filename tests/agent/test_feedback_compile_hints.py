@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from agent.feedback import build_compile_signal_bundle, render_compile_signals
+from engine.agent.feedback import build_compile_signal_bundle, render_compile_signals
 from sdk import TestReport as SDKTestReport
 
 

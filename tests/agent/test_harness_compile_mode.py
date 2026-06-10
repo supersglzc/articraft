@@ -7,14 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-import agent.harness as harness
-from agent.feedback import build_compile_signal_bundle
-from agent.harness import ArticraftAgent
-from agent.harness_compile import CompileFeedbackLoop
-from agent.models import CompileReport, TerminateReason
-from agent.tools.compile_model import CompileModelTool
-from agent.tools.registry import ToolRegistry
-from agent.tools.write_code import WriteFileTool
+import engine.agent.harness as harness
+from engine.agent.feedback import build_compile_signal_bundle
+from engine.agent.harness import ArticraftAgent
+from engine.agent.harness_compile import CompileFeedbackLoop
+from engine.agent.models import CompileReport, TerminateReason
+from engine.agent.tools.compile_model import CompileModelTool
+from engine.agent.tools.registry import ToolRegistry
+from engine.agent.tools.write_code import WriteFileTool
 
 
 class _CountingDisplay:

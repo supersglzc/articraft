@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from agent.compiler import load_model_globals
-from agent.tools.probe_model import ProbeModelTool
-from agent.tools.probe_model.helpers import ProbeSession
+from engine.agent.compiler import load_model_globals
+from engine.agent.tools.probe_model import ProbeModelTool
+from engine.agent.tools.probe_model.helpers import ProbeSession
 
 
 def _write_probe_fixture(script_path: Path, *, include_object_model: bool = True) -> None:

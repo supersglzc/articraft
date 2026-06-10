@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cli.common import provider_for_record_image, refresh_dataset_manifest_if_member
-from storage.repo import StorageRepo
+from engine.cli.common import provider_for_record_image, refresh_dataset_manifest_if_member
+from engine.storage.repo import StorageRepo
 
 
 def _write_json(path: Path, payload: object) -> None:

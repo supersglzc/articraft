@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from agent.run_context import RunExecutionOutcome
-from cli import main as articraft_cli
+from engine.agent.run_context import RunExecutionOutcome
+from engine.cli import main as articraft_cli
 
 
 def _help_text(argv: list[str], capsys: pytest.CaptureFixture[str]) -> str:

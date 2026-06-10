@@ -5,9 +5,9 @@ import threading
 from pathlib import Path
 from typing import Any
 
-import storage.search as search_module
-from storage.repo import StorageRepo
-from storage.search import SearchIndex
+import engine.storage.search as search_module
+from engine.storage.repo import StorageRepo
+from engine.storage.search import SearchIndex
 
 
 def test_search_index_cache_writes_use_unique_temporary_paths(tmp_path: Path, monkeypatch) -> None:

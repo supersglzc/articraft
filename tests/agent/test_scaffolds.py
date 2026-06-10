@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from agent.harness import _minimal_scaffold_text
+from engine.agent.harness import _minimal_scaffold_text
 
 
 def _imported_names(tree: ast.Module, *, module_name: str) -> set[str]:
@@ -17,7 +17,7 @@ def _imported_names(tree: ast.Module, *, module_name: str) -> set[str]:
 
 def test_base_scaffold_matches_harness_fallback() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    scaffold_path = repo_root / "scaffold.py"
+    scaffold_path = repo_root / "sdk" / "scaffold.py"
     scaffold_text = scaffold_path.read_text(encoding="utf-8")
     tree = ast.parse(scaffold_text)
 

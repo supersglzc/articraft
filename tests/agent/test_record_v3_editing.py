@@ -7,15 +7,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from agent import runner
-from agent.edit import edit_record as edit_record_impl
-from agent.prompts import DESIGNER_PROMPT_NAME
-from agent.run_context import RunExecutionOutcome
-from storage.datasets import DatasetStore
-from storage.repo import StorageRepo
-from storage.revisions import active_model_path, active_provenance_path
+from engine.agent import runner
+from engine.agent.edit import edit_record as edit_record_impl
+from engine.agent.prompts import DESIGNER_PROMPT_NAME
+from engine.agent.run_context import RunExecutionOutcome
+from engine.storage.datasets import DatasetStore
+from engine.storage.repo import StorageRepo
+from engine.storage.revisions import active_model_path, active_provenance_path
+from engine.viewer.api.app import create_app
 from tests.helpers import FakeAgent
-from viewer.api.app import create_app
 
 
 class SeedInspectingAgent(FakeAgent):

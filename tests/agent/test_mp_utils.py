@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent import mp_utils
+from engine.agent import mp_utils
 
 
 def test_resolve_mp_start_method_prefers_spawn(monkeypatch: pytest.MonkeyPatch) -> None:

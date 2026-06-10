@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from storage.lfs import (
+from engine.storage.lfs import (
     hydrate_records,
     record_payload_status,
     select_records_for_hydration,
 )
-from storage.lfs_pointers import LFS_POINTER_HEADER, is_lfs_pointer_file
-from storage.queries import StorageQueries
-from storage.records_index import RecordsIndexError, load_records_index
-from storage.repo import StorageRepo
+from engine.storage.lfs_pointers import LFS_POINTER_HEADER, is_lfs_pointer_file
+from engine.storage.queries import StorageQueries
+from engine.storage.records_index import RecordsIndexError, load_records_index
+from engine.storage.repo import StorageRepo
 
 
 def _write_index(repo: StorageRepo) -> None:
@@ -142,7 +142,7 @@ def test_hydrate_records_runs_targeted_lfs_pull(
                 )
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("storage.lfs.subprocess.run", fake_run)
+    monkeypatch.setattr("engine.storage.lfs.subprocess.run", fake_run)
 
     result = hydrate_records(repo, ["rec_alpha", "rec_beta"])
 
@@ -184,7 +184,7 @@ def test_hydrate_records_fails_when_lfs_leaves_pointers(
             return subprocess.CompletedProcess(command, 1, stdout="", stderr="")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr("storage.lfs.subprocess.run", fake_run)
+    monkeypatch.setattr("engine.storage.lfs.subprocess.run", fake_run)
 
     with pytest.raises(RuntimeError, match="still unhydrated: rec_alpha"):
         hydrate_records(repo, ["rec_alpha"])

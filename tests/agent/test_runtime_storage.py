@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from agent import runner
-from agent.models import AgentResult, TerminateReason
-from agent.prompts import DESIGNER_PROMPT_NAME
+from engine.agent import runner
+from engine.agent.models import AgentResult, TerminateReason
+from engine.agent.prompts import DESIGNER_PROMPT_NAME
 from tests.helpers import FakeAgent
 
 

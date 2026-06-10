@@ -5,13 +5,19 @@ from pathlib import Path
 
 import pytest
 
-from cli import external as external_cli
-from cli import main as articraft_cli
-from storage.categories import CategoryStore
-from storage.models import CategoryRecord, DisplayMetadata, Record, RecordArtifacts, SourceRef
-from storage.records import RecordStore
-from storage.repo import StorageRepo
-from storage.revisions import active_model_path, active_provenance_path
+from engine.cli import external as external_cli
+from engine.cli import main as articraft_cli
+from engine.storage.categories import CategoryStore
+from engine.storage.models import (
+    CategoryRecord,
+    DisplayMetadata,
+    Record,
+    RecordArtifacts,
+    SourceRef,
+)
+from engine.storage.records import RecordStore
+from engine.storage.repo import StorageRepo
+from engine.storage.revisions import active_model_path, active_provenance_path
 
 
 def _fake_compile(repo_root: Path):

@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from storage.data_validation import validate_data_format
-from storage.lfs_pointers import LFS_POINTER_HEADER
-from storage.records import WORKBENCH_RECORD_GITIGNORE_TEXT
-from storage.records_index import write_records_index
-from storage.repo import StorageRepo
+from engine.storage.data_validation import validate_data_format
+from engine.storage.lfs_pointers import LFS_POINTER_HEADER
+from engine.storage.records import WORKBENCH_RECORD_GITIGNORE_TEXT
+from engine.storage.records_index import write_records_index
+from engine.storage.repo import StorageRepo
 
 
 def _write_json(path: Path, payload: object) -> None:

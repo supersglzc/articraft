@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from storage.models import SupercategoryEntry, SupercategoryManifest
-from storage.repo import StorageRepo
-from storage.supercategories import SupercategoryStore
+from engine.storage.models import SupercategoryEntry, SupercategoryManifest
+from engine.storage.repo import StorageRepo
+from engine.storage.supercategories import SupercategoryStore
 
 
 def test_round_trip_save_and_load(tmp_path: Path) -> None:

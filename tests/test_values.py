@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from articraft.values import (
+from engine.articraft.values import (
     ProviderName,
     ThinkingLevel,
     infer_provider_from_model_id,

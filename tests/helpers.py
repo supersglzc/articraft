@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from agent import runner
-from agent.models import AgentResult, TerminateReason
-from agent.prompts import DESIGNER_PROMPT_NAME
+from engine.agent import runner
+from engine.agent.models import AgentResult, TerminateReason
+from engine.agent.prompts import DESIGNER_PROMPT_NAME
 
 
 class FakeAgent:

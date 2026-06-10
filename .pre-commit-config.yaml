@@ -40,17 +40,17 @@ repos:
         stages: [pre-commit]
       - id: viewer-lint
         name: viewer lint
-        entry: npm --prefix viewer/web run lint
+        entry: npm --prefix engine/viewer/web run lint
         language: system
         pass_filenames: false
-        files: ^viewer/web/
+        files: ^engine/viewer/web/
         stages: [pre-commit]
       - id: viewer-typecheck
         name: viewer typecheck
-        entry: npm --prefix viewer/web run typecheck
+        entry: npm --prefix engine/viewer/web run typecheck
         language: system
         pass_filenames: false
-        files: ^viewer/web/
+        files: ^engine/viewer/web/
         stages: [pre-commit]
       - id: smoke-tests
         name: push smoke tests

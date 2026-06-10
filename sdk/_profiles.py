@@ -83,7 +83,7 @@ _SDK_PACKAGE_ALIASES = {
 SDK_PROFILES: dict[str, SdkProfile] = {
     "sdk": SdkProfile(
         package_name="sdk",
-        scaffold_path=Path("scaffold.py"),
+        scaffold_path=Path("sdk/scaffold.py"),
         docs_full=_COMMON_DOCS[:4] + _BASE_DOCS + _CADQUERY_DOCS + _COMMON_DOCS[4:],
         docs_core=(
             Path("sdk/_docs/common/00_quickstart.md"),

@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from agent.tools.read_file import ReadFileTool
-from agent.workspace_docs import build_virtual_workspace, load_sdk_docs_bundle
+from engine.agent.tools.read_file import ReadFileTool
+from engine.agent.workspace_docs import build_virtual_workspace, load_sdk_docs_bundle
 
 
 def test_load_sdk_docs_bundle_mounts_router_and_default_refs() -> None:

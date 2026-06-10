@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from articraft.config import (
+from engine.articraft.config import (
     DEFAULT_GENERATION_MODEL,
     DEFAULT_THINKING_LEVEL,
     default_model_from_env,

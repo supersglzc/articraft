@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent.defaults import (
+from engine.agent.defaults import (
     DEFAULT_MAX_TURNS,
     GEMINI_3_FLASH_DEFAULT_MAX_TURNS,
     default_max_turns_for_model,

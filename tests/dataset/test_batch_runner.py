@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from agent import batch_runner
-from storage.datasets import DatasetStore
-from storage.repo import StorageRepo
+from engine.agent import batch_runner
+from engine.storage.datasets import DatasetStore
+from engine.storage.repo import StorageRepo
 
 
 def _make_row() -> batch_runner.BatchRowSpec:

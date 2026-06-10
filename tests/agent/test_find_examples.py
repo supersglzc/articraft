@@ -4,10 +4,14 @@ import asyncio
 import json
 from pathlib import Path
 
-from agent.examples import load_example_documents, parse_example_document, search_example_documents
-from agent.harness import ArticraftAgent
-from agent.models import TerminateReason
-from agent.tools.find_examples import FindExamplesTool
+from engine.agent.examples import (
+    load_example_documents,
+    parse_example_document,
+    search_example_documents,
+)
+from engine.agent.harness import ArticraftAgent
+from engine.agent.models import TerminateReason
+from engine.agent.tools.find_examples import FindExamplesTool
 
 
 def test_parse_example_document_reads_frontmatter() -> None:

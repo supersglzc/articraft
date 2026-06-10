@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from agent import runner
-from cli.dataset import main as dataset_main
-from storage import dataset_workflow
-from storage.categories import CategoryStore
-from storage.collections import CollectionStore
-from storage.datasets import DatasetStore
-from storage.models import (
+from engine.agent import runner
+from engine.cli.dataset import main as dataset_main
+from engine.storage import dataset_workflow
+from engine.storage.categories import CategoryStore
+from engine.storage.collections import CollectionStore
+from engine.storage.datasets import DatasetStore
+from engine.storage.models import (
     CategoryRecord,
     DisplayMetadata,
     Record,
@@ -24,10 +24,10 @@ from storage.models import (
     RunRecord,
     SourceRef,
 )
-from storage.records import RecordStore
-from storage.repo import StorageRepo
-from storage.revisions import active_provenance_path
-from storage.runs import RunStore
+from engine.storage.records import RecordStore
+from engine.storage.repo import StorageRepo
+from engine.storage.revisions import active_provenance_path
+from engine.storage.runs import RunStore
 from tests.helpers import FakeAgent
 
 
@@ -808,11 +808,11 @@ def test_run_batch_does_not_warn_when_post_commit_hook_missing(
             "failed_count": 0,
         }
 
-    fake_module = types.ModuleType("agent.batch_runner")
+    fake_module = types.ModuleType("engine.agent.batch_runner")
     fake_module.build_batch_config = _fake_build_batch_config
     fake_module.keep_system_awake = lambda enabled: _NoopAwake()
     fake_module.run_dataset_batch = _fake_run_dataset_batch
-    monkeypatch.setitem(sys.modules, "agent.batch_runner", fake_module)
+    monkeypatch.setitem(sys.modules, "engine.agent.batch_runner", fake_module)
 
     output = io.StringIO()
     with redirect_stdout(output):

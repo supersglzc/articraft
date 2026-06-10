@@ -40,7 +40,7 @@ dependencies = [
 ]
 
 [project.scripts]
-articraft = "cli.main:main"
+articraft = "engine.cli.main:main"
 
 [project.urls]
 Homepage = "https://github.com/mattzh72/articraft"
@@ -53,11 +53,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = [
-    "articraft",
-    "agent",
-    "cli",
-    "storage",
-    "viewer",
+    "engine",
     "sdk",
 ]
 
@@ -75,8 +71,8 @@ exclude = [
     "/data/records",
     "/dist",
     "/node_modules",
-    "/viewer/web/dist",
-    "/viewer/web/node_modules",
+    "/engine/viewer/web/dist",
+    "/engine/viewer/web/node_modules",
 ]
 
 [dependency-groups]
@@ -107,7 +103,7 @@ select = ["E", "F", "I"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"scaffold.py" = ["F821"]
+"sdk/scaffold.py" = ["F821"]
 "sdk/_core/v0/mesh.py" = ["F401"]
 "sdk/_core/v0/testing.py" = ["F401"]
 "sdk/_core/v0/_mesh/__init__.py" = ["F401"]

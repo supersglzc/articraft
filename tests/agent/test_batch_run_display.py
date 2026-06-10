@@ -4,8 +4,8 @@ from io import StringIO
 
 from rich.console import Console
 
-import agent.tui.batch_run as batch_run_module
-from agent.tui.batch_run import BatchRunDisplay
+import engine.agent.tui.batch_run as batch_run_module
+from engine.agent.tui.batch_run import BatchRunDisplay
 
 
 def _make_display() -> tuple[BatchRunDisplay, StringIO]:

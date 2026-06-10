@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from agent.tools.edit_code import ReplaceTool
+from engine.agent.tools.edit_code import ReplaceTool
 
 
 def _write_scaffold(script_path: Path, *, editable_code: str) -> None:

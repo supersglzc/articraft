@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agent import runner
+from engine.agent import runner
 
 
 def test_runner_help_text(capsys: pytest.CaptureFixture[str]) -> None:

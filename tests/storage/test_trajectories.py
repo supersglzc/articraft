@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from storage.repo import StorageRepo
-from storage.trajectories import (
+from engine.storage.repo import StorageRepo
+from engine.storage.trajectories import (
     canonicalize_record_trace_dir,
     trace_system_prompt_paths,
 )

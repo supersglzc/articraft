@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from storage.categories import CategoryStore
-from storage.collections import CollectionStore
-from storage.datasets import DatasetStore
-from storage.materialize import MaterializationStore, build_materialization_fingerprint
-from storage.models import (
+from engine.storage.categories import CategoryStore
+from engine.storage.collections import CollectionStore
+from engine.storage.datasets import DatasetStore
+from engine.storage.materialize import MaterializationStore, build_materialization_fingerprint
+from engine.storage.models import (
     CategoryRecord,
     CompileReport,
     DisplayMetadata,
@@ -22,9 +22,9 @@ from storage.models import (
     SdkSettings,
     SourceRef,
 )
-from storage.records import RecordStore
-from storage.repo import StorageRepo
-from storage.runs import RunStore
+from engine.storage.records import RecordStore
+from engine.storage.repo import StorageRepo
+from engine.storage.runs import RunStore
 
 
 def test_storage_repo_round_trips_records_collections_and_runs(tmp_path: Path) -> None:
@@ -337,7 +337,7 @@ def test_dataset_manifest_does_not_rescan_records_index_for_each_record_dir(
     for index in range(5):
         repo.layout.record_dir(f"rec_unhydrated_{index}").mkdir(parents=True)
 
-    from storage import datasets as datasets_module
+    from engine.storage import datasets as datasets_module
 
     calls = 0
     original_load_records_index = datasets_module.load_records_index

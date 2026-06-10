@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from agent.feedback import build_compile_signal_bundle
-from cli import compile_record
-from storage.repo import StorageRepo
+from engine.agent.feedback import build_compile_signal_bundle
+from engine.cli import compile_record
+from engine.storage.repo import StorageRepo
 
 
 def test_compile_record_prints_structured_compile_signals(

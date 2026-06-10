@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from storage.layout import StorageLayout
+from engine.storage.layout import StorageLayout
 
 
 def test_storage_layout_paths() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from cli import hooks
+from engine.cli import hooks
 
 
 def _git(repo_root: Path, *args: str) -> str:

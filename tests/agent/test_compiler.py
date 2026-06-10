@@ -5,8 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from agent.compiler import compile_urdf_report, persist_compile_success_artifacts, update_manifest
-from agent.runner import compile_urdf
+from engine.agent.compiler import (
+    compile_urdf_report,
+    persist_compile_success_artifacts,
+    update_manifest,
+)
+from engine.agent.runner import compile_urdf
 
 _REMOVED_PACKAGE = "_".join(("sdk", "hybrid"))
 
@@ -286,7 +290,7 @@ def test_compile_urdf_report_can_ignore_geometry_qc_after_materialization(
             "(not contacting any other part in the checked pose)."
         )
 
-    monkeypatch.setattr("agent.compiler._run_required_tests", fake_run_required_tests)
+    monkeypatch.setattr("engine.agent.compiler._run_required_tests", fake_run_required_tests)
 
     with pytest.raises(RuntimeError, match="URDF compile failure \\(physical, blocking\\)"):
         compile_urdf_report(script_path)
@@ -329,8 +333,8 @@ def test_compile_urdf_report_full_validation_runs_only_run_tests(
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("compiler-owned QC should not run during full validation")
 
-    monkeypatch.setattr("agent.compiler._warn_cwd_relative_asset_paths", fail_if_called)
-    monkeypatch.setattr("agent.compiler._warn_geometry_scale_anomalies", fail_if_called)
+    monkeypatch.setattr("engine.agent.compiler._warn_cwd_relative_asset_paths", fail_if_called)
+    monkeypatch.setattr("engine.agent.compiler._warn_geometry_scale_anomalies", fail_if_called)
 
     report = compile_urdf_report(script_path, run_checks=True, target="full")
 
@@ -700,7 +704,7 @@ def test_compile_urdf_report_preserves_export_exception_details(
         encoding="utf-8",
     )
 
-    import agent.compiler as compiler
+    import engine.agent.compiler as compiler
 
     original_import_sdk_module = compiler._import_sdk_module
 

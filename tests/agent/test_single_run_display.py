@@ -6,7 +6,7 @@ from io import StringIO
 
 from rich.console import Console
 
-from agent.tui.single_run import LLMWaitAwareStreamHandler, SingleRunDisplay
+from engine.agent.tui.single_run import LLMWaitAwareStreamHandler, SingleRunDisplay
 
 
 def _make_display() -> tuple[SingleRunDisplay, StringIO]:

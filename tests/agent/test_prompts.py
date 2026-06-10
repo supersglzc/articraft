@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent.prompts import (
+from engine.agent.prompts import (
     DESIGNER_PROMPT_NAME,
     GEMINI_DESIGNER_PROMPT_NAME,
     load_prompt_section_text,
     load_system_prompt_text,
     resolve_system_prompt_path,
 )
-from agent.tools import (
+from engine.agent.tools import (
     build_first_turn_runtime_guidance,
     build_initial_user_content,
     prepend_runtime_guidance,
@@ -21,14 +21,14 @@ def test_system_prompt_resolution_variants() -> None:
 
     # Gemini is the only provider; any provider resolves to the Gemini prompt.
     resolved = resolve_system_prompt_path(
-        str(Path("agent/prompts/generated") / DESIGNER_PROMPT_NAME),
+        str(Path("engine/agent/prompts/generated") / DESIGNER_PROMPT_NAME),
         provider="gemini",
         repo_root=repo_root,
     )
     assert resolved.name == GEMINI_DESIGNER_PROMPT_NAME
 
     loaded_path, loaded_text = load_system_prompt_text(
-        str(Path("agent/prompts/generated") / DESIGNER_PROMPT_NAME),
+        str(Path("engine/agent/prompts/generated") / DESIGNER_PROMPT_NAME),
         provider="gemini",
         repo_root=repo_root,
     )
@@ -37,7 +37,7 @@ def test_system_prompt_resolution_variants() -> None:
 
     # An unknown provider still resolves to the Gemini prompt.
     other_resolved = resolve_system_prompt_path(
-        str(Path("agent/prompts/generated") / DESIGNER_PROMPT_NAME),
+        str(Path("engine/agent/prompts/generated") / DESIGNER_PROMPT_NAME),
         provider="openai",
         repo_root=repo_root,
     )

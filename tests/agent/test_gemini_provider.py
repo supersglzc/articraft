@@ -6,8 +6,8 @@ import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from agent.providers.factory import ProviderConfig, default_model_id
-from agent.providers.gemini import (
+from engine.agent.providers.factory import ProviderConfig, default_model_id
+from engine.agent.providers.gemini import (
     DEFAULT_GEMINI_MODEL,
     GeminiLLM,
     _gemini_compaction_prompt_text,

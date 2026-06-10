@@ -8,11 +8,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from storage import dataset_workflow
-from storage.categories import CategoryStore
-from storage.collections import CollectionStore
-from storage.datasets import DatasetStore
-from storage.models import (
+from engine.storage import dataset_workflow
+from engine.storage.categories import CategoryStore
+from engine.storage.collections import CollectionStore
+from engine.storage.datasets import DatasetStore
+from engine.storage.models import (
     CategoryRecord,
     CreatorMetadata,
     DisplayMetadata,
@@ -21,12 +21,12 @@ from storage.models import (
     RunRecord,
     SourceRef,
 )
-from storage.records import RecordStore
-from storage.repo import StorageRepo
-from storage.runs import RunStore
-from viewer.api.app import create_app
-from viewer.api.frontend import install_frontend_routes
-from viewer.api.store import _effective_rating, _within_rating_filter
+from engine.storage.records import RecordStore
+from engine.storage.repo import StorageRepo
+from engine.storage.runs import RunStore
+from engine.viewer.api.app import create_app
+from engine.viewer.api.frontend import install_frontend_routes
+from engine.viewer.api.store import _effective_rating, _within_rating_filter
 
 
 def _patch_dataset_tokens(monkeypatch: pytest.MonkeyPatch, *tokens: str) -> None:
@@ -528,7 +528,7 @@ def test_dataset_browse_resolves_payload_status_only_for_returned_rows(
         calls.append(record_id)
         return "missing"
 
-    monkeypatch.setattr("viewer.api.browse_index.record_payload_status", fake_payload_status)
+    monkeypatch.setattr("engine.viewer.api.browse_index.record_payload_status", fake_payload_status)
     client = TestClient(create_app(repo_root=tmp_path))
 
     browse_ids = client.get("/api/records/browse/ids?source=dataset")
@@ -578,7 +578,9 @@ def test_dashboard_uses_records_index_rows_without_per_record_lookup(
     def fail_per_record_lookup(_repo: StorageRepo, _record_id: str) -> dict:
         raise AssertionError("dashboard should use records_index rows directly")
 
-    monkeypatch.setattr("viewer.api.store_dashboard.find_record_index_row", fail_per_record_lookup)
+    monkeypatch.setattr(
+        "engine.viewer.api.store_dashboard.find_record_index_row", fail_per_record_lookup
+    )
     client = TestClient(create_app(repo_root=tmp_path))
 
     dashboard = client.get("/api/dashboard")
@@ -746,8 +748,8 @@ def test_viewer_api_ensures_record_assets_on_demand(
             warnings=["warning: lazy compile"],
         )
 
-    monkeypatch.setattr("agent.compiler.compile_urdf_report", fake_compile)
-    monkeypatch.setattr("agent.compiler.compile_urdf_report_maybe_timeout", fake_compile)
+    monkeypatch.setattr("engine.agent.compiler.compile_urdf_report", fake_compile)
+    monkeypatch.setattr("engine.agent.compiler.compile_urdf_report_maybe_timeout", fake_compile)
 
     client = TestClient(create_app(repo_root=tmp_path))
 

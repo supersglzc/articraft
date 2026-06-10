@@ -30,18 +30,28 @@ blind (no runnable test env on this machine):
 - Unused non-Gemini pricing constants/detectors in `agent/cost.py`.
 - `--provider` CLI flag still exists but only accepts `gemini`.
 
-## Phase 2 — engine / generators split
+## Phase 2 — engine / generators split (DONE)
 
-The runtime is domain-agnostic and reads only a *generator profile*
+The runtime packages were moved under a single `engine/` package:
+
+    agent storage cli viewer articraft  ->  engine/{agent,storage,cli,viewer,articraft}
+
+`sdk/` stays a top-level package (generated records do `import sdk`); `scaffold.py`
+moved into it (`sdk/scaffold.py`). All imports were rewritten to `engine.*`, and the
+`Path(__file__).parents[N]` repo-root computations were bumped one level. Packaging,
+console script (`engine.cli.main:main`), viewer launch strings, justfile, and
+pre-commit paths were updated. See `GENERATORS.md` for the structure and how to add a
+second generator (e.g. rigid-body).
+
+The engine is domain-agnostic and reads only a *generator profile*
 (`sdk/_profiles.py: SdkProfile`): SDK package + scaffold + docs + designer prompt.
-A second generator is added by registering another profile. `import sdk` is kept
-working so existing records' `model.py` still compile.
 
 ## Verifying
 
-This environment has no `uv`/project venv, so only static checks were run
-(`py_compile`, dangling-reference greps). Run the real suite in your env:
+Done in-env (installed `uv`, `uv sync --group dev`):
 
 ```bash
-just smoke-tests      # or: uv run --group dev pytest tests/agent tests/cli -q
+uv run --group dev pytest -q        # 732 passed, 1 skipped
+uv run ruff check engine sdk tests  # clean
+uv run articraft status             # CLI works; dataset intact (10,787 records)
 ```

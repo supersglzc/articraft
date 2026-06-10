@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from agent.feedback import build_compile_signal_bundle
-from agent.harness import ArticraftAgent
+from engine.agent.feedback import build_compile_signal_bundle
+from engine.agent.harness import ArticraftAgent
 from sdk import TestReport as SDKTestReport
 
 

@@ -4,10 +4,10 @@ import linecache
 from pathlib import Path
 from types import SimpleNamespace
 
-from agent.compiler import _warn_geometry_scale_anomalies
-from agent.feedback import build_compile_signal_bundle, render_compile_signals
-from agent.harness import ArticraftAgent
-from agent.tools.base import ToolResult
+from engine.agent.compiler import _warn_geometry_scale_anomalies
+from engine.agent.feedback import build_compile_signal_bundle, render_compile_signals
+from engine.agent.harness import ArticraftAgent
+from engine.agent.tools.base import ToolResult
 from sdk import AllowedOverlap, ArticulatedObject, Box, Cylinder
 from sdk import TestReport as SDKTestReport
 

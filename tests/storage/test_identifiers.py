@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from storage.categories import CategoryStore
-from storage.datasets import DatasetStore
-from storage.identifiers import validate_category_slug, validate_record_id
-from storage.models import CategoryRecord
-from storage.records import RecordStore
-from storage.repo import StorageRepo
+from engine.storage.categories import CategoryStore
+from engine.storage.datasets import DatasetStore
+from engine.storage.identifiers import validate_category_slug, validate_record_id
+from engine.storage.models import CategoryRecord
+from engine.storage.records import RecordStore
+from engine.storage.repo import StorageRepo
 
 
 def test_validate_category_slug_rejects_path_like_values() -> None:

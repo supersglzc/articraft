@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from agent import runner
-from agent.defaults import DEFAULT_MAX_TURNS, GEMINI_3_FLASH_DEFAULT_MAX_TURNS
-from agent.run_context import RunExecutionOutcome
-from cli import workbench as workbench_cli
-from cli.workbench import main as workbench_main
+from engine.agent import runner
+from engine.agent.defaults import DEFAULT_MAX_TURNS, GEMINI_3_FLASH_DEFAULT_MAX_TURNS
+from engine.agent.run_context import RunExecutionOutcome
+from engine.cli import workbench as workbench_cli
+from engine.cli.workbench import main as workbench_main
 from tests.helpers import FakeAgent
 
 

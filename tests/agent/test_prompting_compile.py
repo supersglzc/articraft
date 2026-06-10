@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import re
 
-from agent.prompts.compile import compile_prompt_variant, find_stale_prompts
-from agent.prompts.spec import iter_prompt_variants
+from engine.agent.prompts.compile import compile_prompt_variant, find_stale_prompts
+from engine.agent.prompts.spec import iter_prompt_variants
 
 REQUIRED_TAGS = (
     "<role>",

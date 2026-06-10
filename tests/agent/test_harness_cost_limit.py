@@ -5,10 +5,10 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from agent.cost import CostTracker
-from agent.harness import ArticraftAgent
-from agent.models import TerminateReason
-from agent.traces import TraceWriter
+from engine.agent.cost import CostTracker
+from engine.agent.harness import ArticraftAgent
+from engine.agent.models import TerminateReason
+from engine.agent.traces import TraceWriter
 
 
 class _DummyDisplay:

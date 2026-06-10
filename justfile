@@ -43,10 +43,10 @@ setup root='.':
     uv run --frozen --directory {{ quote(root) }} articraft hooks install
     uv run --frozen --directory {{ quote(root) }} pre-commit install --hook-type pre-commit --hook-type pre-push
     @if command -v npm >/dev/null 2>&1; then \
-        npm --prefix {{ quote(root + "/viewer/web") }} ci; \
-        npm --prefix {{ quote(root + "/viewer/web") }} run typecheck; \
+        npm --prefix {{ quote(root + "/engine/viewer/web") }} ci; \
+        npm --prefix {{ quote(root + "/engine/viewer/web") }} run typecheck; \
     else \
-        echo "npm not found; skipping viewer/web dependency install."; \
+        echo "npm not found; skipping engine/viewer/web dependency install."; \
         echo "Install Node.js and npm to run the viewer and frontend hooks."; \
     fi
     uv run --frozen --directory {{ quote(root) }} articraft init

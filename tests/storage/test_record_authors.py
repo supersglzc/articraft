@@ -4,14 +4,14 @@ import os
 import subprocess
 from pathlib import Path
 
-from storage.models import DisplayMetadata, Record, RecordArtifacts, SourceRef
-from storage.record_authors import (
+from engine.storage.models import DisplayMetadata, Record, RecordArtifacts, SourceRef
+from engine.storage.record_authors import (
     sync_record_authors,
     sync_record_rated_by,
     sync_record_secondary_rated_by,
 )
-from storage.records import RecordStore
-from storage.repo import StorageRepo
+from engine.storage.records import RecordStore
+from engine.storage.repo import StorageRepo
 
 
 def _git(repo_root: Path, *args: str, env: dict[str, str] | None = None) -> None:

@@ -8,18 +8,18 @@ from pathlib import Path
 
 import pytest
 
-from agent import batch_runner, runner
-from agent.models import AgentResult, TerminateReason
-from cli.dataset import main as dataset_main
-from storage import dataset_workflow
-from storage.categories import CategoryStore
-from storage.datasets import DatasetStore
-from storage.models import CategoryRecord
-from storage.queries import StorageQueries
-from storage.repo import StorageRepo
-from storage.revisions import active_provenance_path
-from storage.search import SearchIndex
-from viewer.api.store import ViewerStore
+from engine.agent import batch_runner, runner
+from engine.agent.models import AgentResult, TerminateReason
+from engine.cli.dataset import main as dataset_main
+from engine.storage import dataset_workflow
+from engine.storage.categories import CategoryStore
+from engine.storage.datasets import DatasetStore
+from engine.storage.models import CategoryRecord
+from engine.storage.queries import StorageQueries
+from engine.storage.repo import StorageRepo
+from engine.storage.revisions import active_provenance_path
+from engine.storage.search import SearchIndex
+from engine.viewer.api.store import ViewerStore
 
 
 def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:

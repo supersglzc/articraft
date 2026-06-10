@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cli import pre_commit
+from engine.cli import pre_commit
 
 
 @pytest.mark.parametrize(

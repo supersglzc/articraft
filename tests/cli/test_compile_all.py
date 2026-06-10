@@ -4,7 +4,7 @@ import queue
 from pathlib import Path
 from types import SimpleNamespace
 
-from cli import compile_all
+from engine.cli import compile_all
 
 
 def test_compile_all_infers_scheduler_class_from_model(tmp_path: Path) -> None:
@@ -67,7 +67,7 @@ def test_compile_all_worker_uses_materialization_component(
             calls.append((record_id, dict(kwargs)))
             return SimpleNamespace(compiled=True)
 
-    import viewer.api.store as store_module
+    import engine.viewer.api.store as store_module
 
     monkeypatch.setattr(store_module, "ViewerStore", FakeViewerStore)
 

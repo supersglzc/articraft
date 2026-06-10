@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from storage.materialize import (
+from engine.storage.materialize import (
     build_materialization_summary,
     build_model_source_snapshot,
     compile_report_matches_model_source_snapshot,
     ensure_record_artifacts_exist,
     infer_materialization_status,
 )
-from storage.repo import StorageRepo
+from engine.storage.repo import StorageRepo
 
 
 def test_infer_materialization_status_marks_primitive_only_success_as_available(
