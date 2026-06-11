@@ -680,7 +680,7 @@ class _DataFormatValidator:
                 self._add_error(record_path, f"artifacts.{key} must be a non-empty relative path")
                 continue
             self._validate_artifact_reference(record_dir, record_path, key, value, required=True)
-        for key in ("prompt_txt", "prompt_series_json", "cost_json", "traces_dir"):
+        for key in ("prompt_txt", "prompt_series_json", "cost_json"):
             value = artifacts.get(key)
             if value is None:
                 continue
@@ -690,16 +690,21 @@ class _DataFormatValidator:
                 )
                 continue
             self._validate_artifact_reference(record_dir, record_path, key, value, required=True)
-        inputs_dir = artifacts.get("inputs_dir")
-        if inputs_dir is not None:
-            if not isinstance(inputs_dir, str) or not inputs_dir:
+        # `inputs_dir` and `traces_dir` are optional directories: they only exist when
+        # there were inputs / traces. External-agent records write no traces, so the
+        # reference may point at a directory that is legitimately absent on disk.
+        for key in ("inputs_dir", "traces_dir"):
+            value = artifacts.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str) or not value:
                 self._add_error(
-                    record_path, "artifacts.inputs_dir must be null or a non-empty relative path"
+                    record_path, f"artifacts.{key} must be null or a non-empty relative path"
                 )
-            else:
-                self._validate_artifact_reference(
-                    record_dir, record_path, "inputs_dir", inputs_dir, required=False
-                )
+                continue
+            self._validate_artifact_reference(
+                record_dir, record_path, key, value, required=False
+            )
         hashes = record.get("hashes")
         if not isinstance(hashes, dict):
             self._add_error(record_path, "hashes must be an object")

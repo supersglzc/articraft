@@ -22,8 +22,8 @@ downloads/
 eggs/
 .eggs/
 lib/
-!viewer/web/src/lib/
-!viewer/web/src/lib/**
+!engine/viewer/web/src/lib/
+!engine/viewer/web/src/lib/**
 lib64/
 parts/
 sdist/
@@ -222,8 +222,8 @@ performance/results/
 # Viewer frontend dependencies/build output
 .mcp.json
 /node_modules/
-viewer/web/node_modules/
-viewer/web/dist/
+engine/viewer/web/node_modules/
+engine/viewer/web/dist/
 *.tsbuildinfo
 
 # Marimo

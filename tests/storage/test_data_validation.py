@@ -192,6 +192,26 @@ def test_validate_data_format_accepts_canonical_data_and_skips_local_workbench(
     assert result.skipped_local_record_count == 1
 
 
+def test_validate_data_format_allows_referenced_traces_dir_to_be_absent(
+    tmp_path: Path,
+) -> None:
+    # External-agent records reference a traces_dir but write no traces, so the
+    # directory is legitimately absent on disk. Validation must still pass.
+    repo = StorageRepo(tmp_path)
+    repo.ensure_layout()
+    prompt_sha = _write_system_prompt(repo)
+    _write_category(repo)
+    _write_batch_spec(repo)
+    _write_record(repo, "rec_hinge_0001", prompt_sha, "ds_hinge_0001")
+
+    traces_dir = repo.layout.record_revision_dir("rec_hinge_0001", "rev_000001") / "traces"
+    traces_dir.rmdir()
+
+    result = validate_data_format(repo)
+
+    assert result.ok, result.errors
+
+
 def test_validate_data_format_accepts_xhigh_thinking_level(tmp_path: Path) -> None:
     repo = StorageRepo(tmp_path)
     repo.ensure_layout()
