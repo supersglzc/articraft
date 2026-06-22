@@ -28,12 +28,24 @@ def extract_mesh(obj) -> trimesh.Trimesh:
     )
 
 
+def _robust_volume(mesh: trimesh.Trimesh) -> float:
+    """Signed volume via the divergence theorem over triangles.
+
+    Works for closed surfaces even when vertices aren't shared across faces — which is
+    how the SDK's manifold->mesh boolean output is laid out, so trimesh's own
+    ``mesh.volume`` (which needs strict watertightness) reports None on it.
+    """
+    tris = mesh.vertices[mesh.faces]
+    v0, v1, v2 = tris[:, 0], tris[:, 1], tris[:, 2]
+    return float(abs(np.einsum("ij,ij->i", v0, np.cross(v1, v2)).sum()) / 6.0)
+
+
 def metrics(mesh: trimesh.Trimesh) -> dict:
     return {
         "vertices": int(len(mesh.vertices)),
         "faces": int(len(mesh.faces)),
         "watertight": bool(mesh.is_watertight),
-        "volume": float(mesh.volume) if mesh.is_volume else None,
+        "volume": _robust_volume(mesh),
         "area": float(mesh.area),
         "bbox": [round(float(d), 6) for d in mesh.extents],
         "centroid": [round(float(c), 6) for c in mesh.centroid],

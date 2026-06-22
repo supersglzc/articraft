@@ -20,8 +20,7 @@ from typing import List, Sequence, Tuple
 
 import numpy as np
 
-from .booleans import boolean_difference
-from .primitives import CylinderGeometry, ExtrudeGeometry, MeshGeometry
+from .primitives import CylinderGeometry, ExtrudeGeometry, LatheGeometry, MeshGeometry
 
 Vec2 = Tuple[float, float]
 
@@ -29,13 +28,16 @@ _EPS = 1.0e-6
 
 
 def annulus(r_inner: float, r_outer: float, height: float, *, segments: int = 128) -> MeshGeometry:
-    """Hollow tube along +Z centered at the origin (cq ``circle(r_o).circle(r_i).extrude``)."""
+    """Hollow tube along +Z centered at the origin (cq ``circle(r_o).circle(r_i).extrude``).
+
+    Revolves a ring rectangle via the SDK's :class:`LatheGeometry` — exact, watertight,
+    and always manifold (a direct hand-wound tube or boolean-of-cylinders is fragile).
+    """
     if not (0.0 < r_inner < r_outer):
         raise ValueError("annulus requires 0 < r_inner < r_outer")
-    outer = CylinderGeometry(r_outer, height, radial_segments=segments)
-    # slightly taller inner cutter avoids coplanar caps that confuse the boolean kernel
-    inner = CylinderGeometry(r_inner, height + 2.0 * _EPS, radial_segments=segments)
-    return boolean_difference(outer, inner)
+    h = height * 0.5
+    ring = [(r_inner, -h), (r_outer, -h), (r_outer, h), (r_inner, h)]
+    return LatheGeometry(ring, segments=segments)
 
 
 def annulus_x(
@@ -43,6 +45,14 @@ def annulus_x(
 ) -> MeshGeometry:
     """Tube aligned to local X (cq ``Workplane("YZ").circle().circle().extrude``)."""
     geom = annulus(r_inner, r_outer, width, segments=segments).rotate_y(pi / 2.0)
+    return geom.translate(x_center, 0.0, 0.0) if x_center else geom
+
+
+def cylinder_x(
+    radius: float, length: float, x_center: float = 0.0, *, segments: int = 128
+) -> MeshGeometry:
+    """Cylinder aligned to local X (cq ``Workplane("YZ").circle(r).extrude(...)``)."""
+    geom = CylinderGeometry(radius, length, radial_segments=segments).rotate_y(pi / 2.0)
     return geom.translate(x_center, 0.0, 0.0) if x_center else geom
 
 
