@@ -235,3 +235,4 @@ assets/
 
 .npm-cache/
 .local-dev
+artifacts/
