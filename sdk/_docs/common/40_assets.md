@@ -73,10 +73,10 @@ mesh_ref(filename: str | Path) -> str
 These public surfaces accept an explicit asset owner or root:
 
 - `ArticulatedObject(..., assets=...)`
-- `export_cadquery_mesh(..., assets=...)`
-- `export_cadquery_components(..., assets=...)`
-- `mesh_from_cadquery(..., assets=...)`
-- `mesh_components_from_cadquery(..., assets=...)`
+- `export_mesh-geometry_mesh(..., assets=...)`
+- `export_mesh-geometry_components(..., assets=...)`
+- `mesh_from_geometry(..., assets=...)`
+- `mesh_components_from_mesh-geometry(..., assets=...)`
 
 If an object model already carries `assets=...`, prefer `TestContext(model)`
 instead of repeating `asset_root=...`.

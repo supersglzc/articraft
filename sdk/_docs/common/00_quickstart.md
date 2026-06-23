@@ -47,15 +47,6 @@ Always available in `docs/sdk/references/`:
 - `placement.md`: placement helpers for mounting, offsets, wrapping, and alignment.
 - `probe-tooling.md`: `probe_model` helper catalog and inspection workflow.
 - `testing.md`: `TestContext`, `expect_*` assertions, and test authoring patterns.
-- `cadquery/overview.md`: when and why to use CadQuery-style geometry in Articraft.
-- `cadquery/primer.md`: CadQuery mental model and core shape-building workflow.
-- `cadquery/workplane.md`: workplane-based modeling patterns and common operations.
-- `cadquery/sketch.md`: sketch-driven 2D profiles and profile construction tools.
-- `cadquery/assembly.md`: CadQuery assembly helpers and composition patterns.
-- `cadquery/gears.md`: vendored gear builders and the preserved `Workplane.gear()`
-  plugin workflow.
-- `cadquery/free-functions.md`: free-function geometry helpers and utility builders.
-- `cadquery/api-ref.md`: compact CadQuery API reference and signatures.
 
 Additional geometry references:
 
@@ -283,8 +274,6 @@ Articraft brief:
 - If you need compile/debug interpretation, read `docs/sdk/references/errors.md`.
 - If you need probe helper details, read `docs/sdk/references/probe-tooling.md`.
 - If you need testing details, read `docs/sdk/references/testing.md`.
-- If you need lower-level CadQuery geometry, read the relevant
-  `docs/sdk/references/cadquery/*.md` document.
 - If you need semantic geometry families, read the relevant
   `docs/sdk/references/geometry/*.md` family page first.
 - If you need low-level mesh, wire, or loft helpers, read the relevant

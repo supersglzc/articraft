@@ -6,14 +6,12 @@ import pytest
 
 import sdk
 
-cq = pytest.importorskip("cadquery")
-
 
 @pytest.mark.parametrize(
-    ("gear_ctor", "kwargs", "expected_type_name"),
+    ("gear_ctor", "kwargs"),
     [
-        ("SpurGear", {"module": 0.5, "teeth_number": 12, "width": 3.0, "bore_d": 2.0}, "Compound"),
-        ("RingGear", {"module": 0.5, "teeth_number": 24, "width": 3.0, "rim_width": 1.5}, "Solid"),
+        ("SpurGear", {"module": 0.5, "teeth_number": 12, "width": 3.0, "bore_d": 2.0}),
+        ("RingGear", {"module": 0.5, "teeth_number": 24, "width": 3.0, "rim_width": 1.5}),
         (
             "HerringbonePlanetaryGearset",
             {
@@ -25,7 +23,6 @@ cq = pytest.importorskip("cadquery")
                 "n_planets": 2,
                 "helix_angle": 15.0,
             },
-            "Compound",
         ),
         (
             "BevelGearPair",
@@ -36,14 +33,9 @@ cq = pytest.importorskip("cadquery")
                 "face_width": 2.0,
                 "axis_angle": 90.0,
             },
-            "Compound",
         ),
-        ("RackGear", {"module": 0.5, "length": 10.0, "width": 3.0, "height": 2.0}, "Solid"),
-        (
-            "Worm",
-            {"module": 0.5, "lead_angle": 20.0, "n_threads": 1, "length": 8.0},
-            "Solid",
-        ),
+        ("RackGear", {"module": 0.5, "length": 10.0, "width": 3.0, "height": 2.0}),
+        ("Worm", {"module": 0.5, "lead_angle": 20.0, "n_threads": 1, "length": 8.0}),
         (
             "CrossedGearPair",
             {
@@ -55,42 +47,33 @@ cq = pytest.importorskip("cadquery")
                 "shaft_angle": 90.0,
                 "gear1_helix_angle": 30.0,
             },
-            "Compound",
         ),
         (
             "HyperbolicGearPair",
             {"module": 0.5, "gear1_teeth_number": 12, "width": 2.0, "shaft_angle": 40.0},
-            "Compound",
         ),
     ],
 )
 def test_representative_vendored_gears_build(
     gear_ctor: str,
     kwargs: dict[str, float | int],
-    expected_type_name: str,
 ) -> None:
+    """Each gear is a native MeshGeometry and builds a non-empty body (no CadQuery)."""
     gear_cls = getattr(sdk, gear_ctor)
     gear = gear_cls(**kwargs)
+
+    assert isinstance(gear, sdk.MeshGeometry)
     body = gear.build()
+    assert isinstance(body, sdk.MeshGeometry)
+    assert len(body.vertices) > 0 and len(body.faces) > 0
 
-    assert isinstance(body, cq.Shape)
-    assert type(body).__name__ == expected_type_name
 
-
-def test_workplane_gear_plugin_and_top_level_helpers() -> None:
+def test_top_level_gear_helper_merges_onto_target() -> None:
+    """``sdk.gear`` merges a gear onto a MeshGeometry target (native, no CadQuery plugin)."""
     spur = sdk.SpurGear(module=0.5, teeth_number=12, width=3.0, bore_d=2.0)
-
-    wp = cq.Workplane("XY").gear(spur)
-    assert isinstance(wp, cq.Workplane)
-    assert len(wp.vals()) == 1
-
-    helper_wp = sdk.gear(cq.Workplane("XY"), spur)
-    assert isinstance(helper_wp, cq.Workplane)
-    assert len(helper_wp.vals()) == 1
-
-    union_wp = cq.Workplane("XY").circle(4.0).extrude(1.0).addGear(spur)
-    assert isinstance(union_wp, cq.Workplane)
-    assert union_wp.solids().vals()
+    merged = sdk.gear(sdk.BoxGeometry((10.0, 10.0, 1.0)), spur)
+    assert isinstance(merged, sdk.MeshGeometry)
+    assert len(merged.vertices) > 0
 
 
 def test_sdk_gears_module_reexports_classes() -> None:

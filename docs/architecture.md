@@ -23,5 +23,5 @@ See [Dataset Generation](dataset_generation.md) for detailed workflows on creati
 
 ## Dependencies
 
-- **Python Runtime**: Pinned to version `3.12` for `uv` (currently avoids `3.13` out of the box because of `cadquery` & `vtk` wheel constraints).
+- **Python Runtime**: Pinned to version `3.12` for `uv` (currently avoids `3.13` out of the box because of `vtk` wheel constraints).
 - **Frontend App**: standard npm `package.json` for Vite and Three.js running within `engine/viewer/web/`.

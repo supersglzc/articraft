@@ -1,11 +1,11 @@
 """Mesh-native construction helpers (trimesh/manifold3d-free at this layer).
 
-Small, composable helpers used by the geometry generators in place of CadQuery. They
+Small, composable helpers used by the geometry generators in place of a CAD kernel. They
 return :class:`MeshGeometry` and build on the existing native primitives + boolean ops,
 so generators read as plain mesh construction with no CAD kernel.
 
-What lives here (the CadQuery vocabulary the generators actually used):
-- ``annulus`` / ``annulus_x``      tube (cq ``circle().circle().extrude()``)
+What lives here (the construction vocabulary the generators actually used):
+- ``annulus`` / ``annulus_x``      tube (``circle().circle().extrude()``)
 - ``round_polygon_2d``             corner rounding/chamfer of a convex profile
 - ``rounded_prism`` / ``rounded_box``   cq ``box.edges("|Z").fillet/chamfer``
 
@@ -28,7 +28,7 @@ _EPS = 1.0e-6
 
 
 def annulus(r_inner: float, r_outer: float, height: float, *, segments: int = 128) -> MeshGeometry:
-    """Hollow tube along +Z centered at the origin (cq ``circle(r_o).circle(r_i).extrude``).
+    """Hollow tube along +Z centered at the origin (``circle(r_o).circle(r_i).extrude``).
 
     Revolves a ring rectangle via the SDK's :class:`LatheGeometry` — exact, watertight,
     and always manifold (a direct hand-wound tube or boolean-of-cylinders is fragile).
@@ -43,7 +43,7 @@ def annulus(r_inner: float, r_outer: float, height: float, *, segments: int = 12
 def annulus_x(
     r_inner: float, r_outer: float, width: float, x_center: float = 0.0, *, segments: int = 128
 ) -> MeshGeometry:
-    """Tube aligned to local X (cq ``Workplane("YZ").circle().circle().extrude``)."""
+    """Tube aligned to local X (``Workplane("YZ").circle().circle().extrude``)."""
     geom = annulus(r_inner, r_outer, width, segments=segments).rotate_y(pi / 2.0)
     return geom.translate(x_center, 0.0, 0.0) if x_center else geom
 
@@ -51,17 +51,41 @@ def annulus_x(
 def cylinder_x(
     radius: float, length: float, x_center: float = 0.0, *, segments: int = 128
 ) -> MeshGeometry:
-    """Cylinder aligned to local X (cq ``Workplane("YZ").circle(r).extrude(...)``)."""
+    """Cylinder aligned to local X (``Workplane("YZ").circle(r).extrude(...)``)."""
     geom = CylinderGeometry(radius, length, radial_segments=segments).rotate_y(pi / 2.0)
     return geom.translate(x_center, 0.0, 0.0) if x_center else geom
 
 
+def cylinder_y(
+    radius: float, length: float, center: Vec3 = (0.0, 0.0, 0.0), *, segments: int = 128
+) -> MeshGeometry:
+    """Cylinder aligned to local Y (``Workplane("XZ").circle(r).extrude(..., both=True)``)."""
+    geom = CylinderGeometry(radius, length, radial_segments=segments).rotate_x(pi / 2.0)
+    cx, cy, cz = center
+    return geom.translate(cx, cy, cz) if (cx or cy or cz) else geom
+
+
+def cylinder_z(radius: float, length: float, z_center: float = 0.0, *, segments: int = 128):
+    """Cylinder aligned to local Z, centered (``Workplane("XY").circle(r).extrude``)."""
+    geom = CylinderGeometry(radius, length, radial_segments=segments)
+    return geom.translate(0.0, 0.0, z_center) if z_center else geom
+
+
+def prism_xz(profile: Sequence[Vec2], length: float) -> MeshGeometry:
+    """Extrude a 2D ``(x, z)`` profile along local Y (``Workplane("XZ").polyline(...).extrude``).
+
+    ExtrudeGeometry builds the profile in XY extruded along Z; a +90 deg rotation about X maps
+    that to profile ``(u, v) -> (x=u, z=v)`` with a symmetric extrude along Y.
+    """
+    return ExtrudeGeometry(profile, length).rotate_x(pi / 2.0)
+
+
 def prism_yz(profile: Sequence[Vec2], length: float, x_center: float = 0.0) -> MeshGeometry:
-    """Extrude a 2D ``(y, z)`` profile along local X (cq ``Workplane("YZ").polyline(...).extrude``).
+    """Extrude a 2D ``(y, z)`` profile along local X (``Workplane("YZ").polyline(...).extrude``).
 
     ExtrudeGeometry builds the profile in XY extruded along Z. A 120 deg rotation about
     (1,1,1) cyclically maps old (x,y,z) -> (z,x,y), i.e. profile (u,v) -> (y=u, z=v) with
-    the extrude axis on X — matching CadQuery's YZ-plane convention exactly.
+    the extrude axis on X — matching the YZ-plane convention exactly.
     """
     geom = ExtrudeGeometry(profile, length).rotate((1.0, 1.0, 1.0), 2.0 * pi / 3.0)
     return geom.translate(x_center, 0.0, 0.0) if x_center else geom
@@ -72,7 +96,7 @@ def round_polygon_2d(
 ) -> List[Vec2]:
     """Round (fillet) or bevel (chamfer) every corner of a convex CCW polygon.
 
-    Each corner is replaced by an arc tangent to both edges — exactly what CadQuery's
+    Each corner is replaced by an arc tangent to both edges — exactly what a CAD kernel's
     ``.edges("|Z").fillet(r)`` produces on a prism.
     """
     pts = [np.asarray(p, float) for p in points]
@@ -115,7 +139,7 @@ def rounded_prism(
 def rounded_box(
     width: float, height: float, thickness: float, radius: float, *, kind: str = "fillet"
 ) -> MeshGeometry:
-    """Box with vertical edges rounded/chamfered (cq ``box.edges("|Z").fillet(r)``)."""
+    """Box with vertical edges rounded/chamfered (``box.edges("|Z").fillet(r)``)."""
     w, h = width * 0.5, height * 0.5
     rect = [(-w, -h), (w, -h), (w, h), (-w, h)]
     return rounded_prism(rect, thickness, radius, kind=kind)

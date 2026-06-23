@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+from math import radians
 from typing import Optional
 
-from sdk._dependencies import require_cadquery
-
-from .cadquery_helpers import (
-    _centered_pattern_positions,
-    _mesh_geometry_from_cadquery_model,
-    _rounded_slot_profile,
+from .booleans import boolean_difference, boolean_union
+from .native_build import cylinder_y, cylinder_z, prism_xz
+from .primitives import (
+    BoxGeometry,
+    MeshGeometry,
+    _adopt_mesh_geometry,
+    _mesh_geometry_shifted_to_z0,
 )
-from .primitives import MeshGeometry, _adopt_mesh_geometry, _mesh_geometry_shifted_to_z0
+from .shape_helpers import _centered_pattern_positions, _rounded_slot_profile
 from .specs import HingeHolePattern, HingePinStyle
 
 
@@ -74,51 +76,37 @@ class BarrelHingeGeometry(MeshGeometry):
         if segment_length <= 0.0:
             raise ValueError("clearance/knuckle_count leave no knuckle length")
 
-        cq = require_cadquery(feature="BarrelHingeGeometry")
         leaf_overlap = min(leaf_thickness * 0.75, knuckle_outer_diameter * 0.12)
-        leaf_a = (
-            cq.Workplane("XY")
-            .box(leaf_width_a, leaf_thickness, length)
-            .translate(
-                (-(knuckle_outer_diameter * 0.5 + leaf_width_a * 0.5 - leaf_overlap), 0.0, 0.0)
-            )
+        leaf_a = BoxGeometry((leaf_width_a, leaf_thickness, length)).translate(
+            -(knuckle_outer_diameter * 0.5 + leaf_width_a * 0.5 - leaf_overlap), 0.0, 0.0
         )
-        leaf_b = (
-            cq.Workplane("XY")
-            .box(leaf_width_b, leaf_thickness, length)
-            .translate(
-                ((knuckle_outer_diameter * 0.5 + leaf_width_b * 0.5 - leaf_overlap), 0.0, 0.0)
-            )
+        leaf_b = BoxGeometry((leaf_width_b, leaf_thickness, length)).translate(
+            knuckle_outer_diameter * 0.5 + leaf_width_b * 0.5 - leaf_overlap, 0.0, 0.0
         )
-        leaf_b = leaf_b.rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 180.0 - open_angle_deg)
-        shape = leaf_a.union(leaf_b)
+        leaf_b = leaf_b.rotate((0.0, 0.0, 1.0), radians(180.0 - open_angle_deg))
+        shape = boolean_union(leaf_a, leaf_b)
 
         z_start = -length * 0.5
         for index in range(knuckle_count):
             center_z = z_start + segment_length * 0.5 + index * (segment_length + clearance)
-            knuckle = (
-                cq.Workplane("XY")
-                .circle(knuckle_outer_diameter * 0.5)
-                .extrude(segment_length)
-                .translate((0.0, 0.0, center_z - segment_length * 0.5))
+            shape = boolean_union(
+                shape, cylinder_z(knuckle_outer_diameter * 0.5, segment_length, center_z)
             )
-            shape = shape.union(knuckle)
 
         pin_len = length + pin.exposed_end * 2.0
         pin_bottom = -length * 0.5 - pin.exposed_end
-        pin_shape = (
-            cq.Workplane("XY")
-            .circle(pin_diameter * 0.5)
-            .extrude(pin_len)
-            .translate((0.0, 0.0, pin_bottom))
-        )
+        pin_shape = cylinder_z(pin_diameter * 0.5, pin_len, pin_bottom + pin_len * 0.5)
         if pin.head_style != "plain" and pin.head_height > 1e-6:
             head_d = pin.head_diameter or pin_diameter * 1.6
-            head = cq.Workplane("XY").circle(head_d * 0.5).extrude(pin.head_height)
-            pin_shape = pin_shape.union(head.translate((0.0, 0.0, pin_bottom - pin.head_height)))
+            hh = pin.head_height
+            pin_shape = boolean_union(
+                pin_shape, cylinder_z(head_d * 0.5, hh, pin_bottom - hh * 0.5)
+            )
             if pin.head_style != "peened":
-                pin_shape = pin_shape.union(head.translate((0.0, 0.0, pin_bottom + pin_len)))
-        shape = shape.union(pin_shape)
+                pin_shape = boolean_union(
+                    pin_shape, cylinder_z(head_d * 0.5, hh, pin_bottom + pin_len + hh * 0.5)
+                )
+        shape = boolean_union(shape, pin_shape)
 
         def _apply_holes(base_shape, pattern: HingeHolePattern, side: float):
             if pattern.style == "none" or pattern.count <= 0:
@@ -140,29 +128,18 @@ class BarrelHingeGeometry(MeshGeometry):
                     if pattern.slot_size is None:
                         raise ValueError("Slotted hinge holes require slot_size")
                     slot_profile = _rounded_slot_profile(pattern.slot_size[0], pattern.slot_size[1])
-                    cutter = (
-                        cq.Workplane("XZ")
-                        .polyline(
-                            [(x_center + point[0], z_pos + point[1]) for point in slot_profile]
-                        )
-                        .close()
-                        .extrude(leaf_thickness + 0.01, both=True)
-                    )
+                    pts = [(x_center + point[0], z_pos + point[1]) for point in slot_profile]
+                    cutter = prism_xz(pts, leaf_thickness + 0.02)
                 else:
                     hole_r = (pattern.diameter or 0.0) * 0.5
-                    cutter = (
-                        cq.Workplane("XZ")
-                        .circle(hole_r)
-                        .extrude(leaf_thickness + 0.01, both=True)
-                        .translate((x_center, 0.0, z_pos))
-                    )
-                base_shape = base_shape.cut(cutter)
+                    cutter = cylinder_y(hole_r, leaf_thickness + 0.02, (x_center, 0.0, z_pos))
+                base_shape = boolean_difference(base_shape, cutter)
             return base_shape
 
         shape = _apply_holes(shape, holes_a, -1.0)
         shape = _apply_holes(shape, holes_b, 1.0)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         _adopt_mesh_geometry(self, geom)

@@ -418,7 +418,7 @@ def _warn_cwd_relative_asset_paths(*, script_path: Path, warnings: list[str]) ->
         "URDF compile warning (non-blocking): cwd-relative asset paths detected.\n"
         + "\n".join(f"- {item}" for item in findings)
         + "\nUse managed mesh helpers instead: `mesh_from_geometry(..., name='part_name')`, "
-        "`mesh_from_input('existing_mesh')`, `mesh_from_cadquery(..., name='part_name')`, "
+        "`mesh_from_input('existing_mesh')`, `mesh_from_geometry(..., name='part_name')`, "
         "and `TestContext(object_model)`."
     )
 

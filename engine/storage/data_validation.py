@@ -702,9 +702,7 @@ class _DataFormatValidator:
                     record_path, f"artifacts.{key} must be null or a non-empty relative path"
                 )
                 continue
-            self._validate_artifact_reference(
-                record_dir, record_path, key, value, required=False
-            )
+            self._validate_artifact_reference(record_dir, record_path, key, value, required=False)
         hashes = record.get("hashes")
         if not isinstance(hashes, dict):
             self._add_error(record_path, "hashes must be an object")

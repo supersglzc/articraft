@@ -121,7 +121,7 @@ Build a realistic articulated asset with:
 - prompt-specific checks in `run_tests()`
 - no unintentional intersections or disconnected parts
 
-Prefer relevant SDK helpers, CadQuery geometry, lofts, sweeps, booleans, mesh helpers, colors, and materials over boxy placeholder geometry.
+Prefer relevant SDK helpers, mesh geometry, lofts, sweeps, booleans, mesh helpers, colors, and materials over boxy placeholder geometry.
 
 Search for high-rated references when useful:
 

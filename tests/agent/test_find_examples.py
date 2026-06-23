@@ -16,40 +16,40 @@ from engine.agent.tools.find_examples import FindExamplesTool
 
 def test_parse_example_document_reads_frontmatter() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    path = repo_root / "sdk" / "_examples" / "cadquery" / "simple_rectangular_plate.md"
+    path = repo_root / "sdk" / "_examples" / "base" / "scooter_wheel_with_road_tire.md"
 
     doc = parse_example_document(path)
 
-    assert doc.title == "Simple Rectangular Plate"
-    assert doc.description.startswith("Just about the simplest possible example")
-    assert "cadquery" in doc.tags
+    assert doc.title == "Scooter Wheel with Road Tire"
+    assert doc.description.startswith("Base SDK example")
+    assert "wheel" in doc.tags
     assert doc.content.startswith("---\n")
 
 
 def test_search_example_documents_prefers_structured_matches() -> None:
-    matches = search_example_documents("fillet", sdk_package="sdk", limit=3)
+    matches = search_example_documents("axial fan rotor", sdk_package="sdk", limit=3)
 
     assert matches
-    assert matches[0].title == "Rounding Corners with Fillet"
+    assert matches[0].title == "Axial Fan Rotor"
     assert matches[0].match_quality == "strong"
 
 
 def test_search_example_documents_returns_full_content() -> None:
-    matches = search_example_documents("counterbore", sdk_package="sdk", limit=1)
+    matches = search_example_documents("scooter wheel road tire", sdk_package="sdk", limit=1)
 
     assert len(matches) == 1
-    assert "cboreHole" in matches[0].content
+    assert "WheelGeometry" in matches[0].content
     assert matches[0].content.startswith("---\n")
 
 
 def test_search_example_documents_default_limit_is_used() -> None:
-    matches = search_example_documents("workplane", sdk_package="sdk")
+    matches = search_example_documents("wheel", sdk_package="sdk")
 
     assert len(matches) == 3
 
 
 def test_search_example_documents_honors_explicit_large_limit() -> None:
-    matches = search_example_documents("workplane", sdk_package="sdk", limit=100)
+    matches = search_example_documents("wheel", sdk_package="sdk", limit=100)
 
     assert len(matches) > 3
 
@@ -58,22 +58,21 @@ def test_search_example_documents_returns_empty_list_for_no_match() -> None:
     assert search_example_documents("nonexistent-mechanism-token", sdk_package="sdk") == []
 
 
-def test_search_example_documents_ignores_generic_cadquery_tag_matches() -> None:
+def test_search_example_documents_ignores_generic_shared_tag_matches() -> None:
     matches = search_example_documents(
-        "bottle cadquery classic occ bottle",
+        "scooter road tire sdk base sdk mesh geometry",
         sdk_package="sdk",
         limit=10,
     )
 
-    assert [doc.title for doc in matches] == ["The Classic OCC Bottle"]
+    assert [doc.title for doc in matches] == ["Scooter Wheel with Road Tire"]
 
 
 def test_search_example_documents_keeps_specific_body_api_queries() -> None:
-    matches = search_example_documents("cboreHole", sdk_package="sdk", limit=10)
+    matches = search_example_documents("wheel tire spokes bolt", sdk_package="sdk", limit=10)
 
     assert matches
-    assert matches[0].title == "Making Counter-bored and Counter-sunk Holes"
-    assert "A Parametric Bearing Pillow Block" in [doc.title for doc in matches]
+    assert matches[0].title == "Scooter Wheel with Road Tire"
     assert all(doc.match_quality == "strong" for doc in matches)
 
 
@@ -88,7 +87,7 @@ def test_sdk_example_corpus_titles_are_unique() -> None:
 def test_find_examples_tool_returns_expected_shape() -> None:
     async def _run() -> list[dict[str, object]]:
         tool = FindExamplesTool(sdk_package="sdk")
-        invocation = await tool.build({"query": "loft", "limit": 1})
+        invocation = await tool.build({"query": "axial fan rotor", "limit": 1})
         result = await invocation.execute()
         assert result.error is None
         assert isinstance(result.output, list)
@@ -97,9 +96,9 @@ def test_find_examples_tool_returns_expected_shape() -> None:
     output = asyncio.run(_run())
 
     assert len(output) == 1
-    assert output[0]["title"] == "Making Lofts"
-    assert output[0]["example_id"] == "sdk/_examples/cadquery/making_lofts.md"
-    assert output[0]["path"] == "sdk/_examples/cadquery/making_lofts.md"
+    assert output[0]["title"] == "Axial Fan Rotor"
+    assert output[0]["example_id"] == "sdk/_examples/base/axial_fan_rotor.md"
+    assert output[0]["path"] == "sdk/_examples/base/axial_fan_rotor.md"
     assert "content" in output[0]
     assert output[0]["match_quality"] == "strong"
     assert output[0]["matched_tokens"]
@@ -196,7 +195,7 @@ def test_find_examples_tool_supports_base_sdk_examples() -> None:
 def test_find_examples_tool_can_omit_repo_paths_for_gemini() -> None:
     async def _run() -> list[dict[str, object]]:
         tool = FindExamplesTool(sdk_package="sdk", include_paths=False)
-        invocation = await tool.build({"query": "loft", "limit": 1})
+        invocation = await tool.build({"query": "axial fan rotor", "limit": 1})
         result = await invocation.execute()
         assert result.error is None
         assert isinstance(result.output, list)
@@ -205,17 +204,17 @@ def test_find_examples_tool_can_omit_repo_paths_for_gemini() -> None:
     output = asyncio.run(_run())
 
     assert len(output) == 1
-    assert output[0]["title"] == "Making Lofts"
-    assert output[0]["example_id"] == "sdk/_examples/cadquery/making_lofts.md"
+    assert output[0]["title"] == "Axial Fan Rotor"
+    assert output[0]["example_id"] == "sdk/_examples/base/axial_fan_rotor.md"
     assert "path" not in output[0]
 
 
-def test_search_example_documents_sdk_can_retrieve_cadquery_examples() -> None:
-    matches = search_example_documents("making lofts", sdk_package="sdk", limit=3)
+def test_search_example_documents_sdk_can_retrieve_base_examples() -> None:
+    matches = search_example_documents("axial fan rotor", sdk_package="sdk", limit=3)
 
     assert matches
-    assert matches[0].title == "Making Lofts"
-    assert matches[0].path.as_posix().endswith("sdk/_examples/cadquery/making_lofts.md")
+    assert matches[0].title == "Axial Fan Rotor"
+    assert matches[0].path.as_posix().endswith("sdk/_examples/base/axial_fan_rotor.md")
 
 
 def test_search_example_documents_can_return_weakly_relevant_base_matches() -> None:
@@ -234,11 +233,11 @@ def test_find_examples_repeated_results_replace_full_content_with_blurb() -> Non
     first = agent._compress_find_examples_output(
         [
             {
-                "example_id": "sdk/_examples/cadquery/making_lofts.md",
-                "title": "Making Lofts",
-                "description": "Loft example",
-                "tags": ["cadquery"],
-                "path": "sdk/_examples/cadquery/making_lofts.md",
+                "example_id": "sdk/_examples/base/axial_fan_rotor.md",
+                "title": "Axial Fan Rotor",
+                "description": "Fan rotor example",
+                "tags": ["fan"],
+                "path": "sdk/_examples/base/axial_fan_rotor.md",
                 "content": "# full example",
             }
         ]
@@ -246,11 +245,11 @@ def test_find_examples_repeated_results_replace_full_content_with_blurb() -> Non
     second = agent._compress_find_examples_output(
         [
             {
-                "example_id": "sdk/_examples/cadquery/making_lofts.md",
-                "title": "Making Lofts",
-                "description": "Loft example",
-                "tags": ["cadquery"],
-                "path": "sdk/_examples/cadquery/making_lofts.md",
+                "example_id": "sdk/_examples/base/axial_fan_rotor.md",
+                "title": "Axial Fan Rotor",
+                "description": "Fan rotor example",
+                "tags": ["fan"],
+                "path": "sdk/_examples/base/axial_fan_rotor.md",
                 "content": "# full example",
             }
         ]
@@ -274,11 +273,11 @@ def test_find_examples_cache_can_seed_from_prior_conversation() -> None:
                     {
                         "result": [
                             {
-                                "example_id": "sdk/_examples/cadquery/making_lofts.md",
-                                "title": "Making Lofts",
-                                "description": "Loft example",
-                                "tags": ["cadquery"],
-                                "path": "sdk/_examples/cadquery/making_lofts.md",
+                                "example_id": "sdk/_examples/base/axial_fan_rotor.md",
+                                "title": "Axial Fan Rotor",
+                                "description": "Fan rotor example",
+                                "tags": ["fan"],
+                                "path": "sdk/_examples/base/axial_fan_rotor.md",
                                 "content": "# full example",
                             }
                         ]
@@ -291,11 +290,11 @@ def test_find_examples_cache_can_seed_from_prior_conversation() -> None:
     compressed = agent._compress_find_examples_output(
         [
             {
-                "example_id": "sdk/_examples/cadquery/making_lofts.md",
-                "title": "Making Lofts",
-                "description": "Loft example",
-                "tags": ["cadquery"],
-                "path": "sdk/_examples/cadquery/making_lofts.md",
+                "example_id": "sdk/_examples/base/axial_fan_rotor.md",
+                "title": "Axial Fan Rotor",
+                "description": "Fan rotor example",
+                "tags": ["fan"],
+                "path": "sdk/_examples/base/axial_fan_rotor.md",
                 "content": "# full example",
             }
         ]

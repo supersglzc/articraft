@@ -1,11 +1,39 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Sequence, Tuple
 
-from sdk._dependencies import require_cadquery
+from .booleans import boolean_difference, boolean_intersection, boolean_union
+from .native_build import cylinder_x, round_polygon_2d, rounded_box
+from .primitives import (
+    BoxGeometry,
+    ExtrudeGeometry,
+    MeshGeometry,
+    _adopt_mesh_geometry,
+    _mesh_geometry_shifted_to_z0,
+)
 
-from .cadquery_helpers import _mesh_geometry_from_cadquery_model
-from .primitives import MeshGeometry, _adopt_mesh_geometry, _mesh_geometry_shifted_to_z0
+
+def _rounded_rect_profile(
+    width: float, depth: float, fillet: float, x_lo: float, x_hi: float
+) -> list:
+    """A 2D ``(x, z=depth)`` rectangle spanning x in [x_lo, x_hi], y in [-depth/2, depth/2],
+    with its vertical (Z) corners filleted by ``fillet`` (matches ``edges("|Z").fillet``).
+    """
+    d = depth * 0.5
+    rect = [(x_lo, -d), (x_hi, -d), (x_hi, d), (x_lo, d)]
+    return round_polygon_2d(rect, fillet, kind="fillet") if fillet > 1e-6 else rect
+
+
+def _box(size: Tuple[float, float, float]) -> MeshGeometry:
+    """A centered box with outward-facing winding (positive signed volume).
+
+    ``BoxGeometry`` is wound inward, which manifold3d ingests as an inverted solid and
+    breaks boolean differences. Reversing the triangle order yields the same outward
+    convention as the curved primitives so boolean ops behave correctly.
+    """
+    box = BoxGeometry(size)
+    box.faces = [(a, c, b) for (a, b, c) in box.faces]
+    return box
 
 
 class ClevisBracketGeometry(MeshGeometry):
@@ -51,29 +79,35 @@ class ClevisBracketGeometry(MeshGeometry):
                 "bore_center_z must leave material above the base and below the top edge"
             )
 
-        cq = require_cadquery(feature="ClevisBracketGeometry")
-        shape = cq.Workplane("XY").box(width, depth, height)
-        slot_cut = (
-            cq.Workplane("XY")
-            .box(gap_width, depth + 0.004, height - base_thickness)
-            .translate((0.0, 0.0, base_thickness * 0.5))
+        # construction: box -> cut full-depth slot -> fillet "|Z" -> cut bore. The slot spans the
+        # full Y depth, so the Z-vertical cross-section is a solid base plus two cheeks. Build
+        # each region as a profile extrusion with rounded vertical corners; this reproduces the
+        # post-slot fillet on both the outer corners and the inner slot walls exactly.
+        fillet = (
+            min(corner_radius, cheek_thickness * 0.6, depth * 0.25, height * 0.25)
+            if corner_radius > 0.0
+            else 0.0
         )
-        shape = shape.cut(slot_cut)
-        if corner_radius > 0.0:
-            shape = shape.edges("|Z").fillet(
-                min(corner_radius, cheek_thickness * 0.6, depth * 0.25, height * 0.25)
-            )
+        half_w = width * 0.5
+        half_gap = gap_width * 0.5
+        base_geom = ExtrudeGeometry(
+            _rounded_rect_profile(width, depth, fillet, -half_w, half_w), base_thickness
+        ).translate(0.0, 0.0, -height * 0.5 + base_thickness * 0.5)
+        cheek_height = height - base_thickness
+        cheek_z = -height * 0.5 + base_thickness + cheek_height * 0.5
+        left_cheek = ExtrudeGeometry(
+            _rounded_rect_profile(width, depth, fillet, -half_w, -half_gap), cheek_height
+        ).translate(0.0, 0.0, cheek_z)
+        right_cheek = ExtrudeGeometry(
+            _rounded_rect_profile(width, depth, fillet, half_gap, half_w), cheek_height
+        ).translate(0.0, 0.0, cheek_z)
+        shape = boolean_union(boolean_union(base_geom, left_cheek), right_cheek)
 
         bore_z = -height * 0.5 + bore_center_z
-        bore = (
-            cq.Workplane("YZ")
-            .circle(bore_radius)
-            .extrude(width + 0.01, both=True)
-            .translate((0.0, 0.0, bore_z))
-        )
-        shape = shape.cut(bore)
+        bore = cylinder_x(bore_radius, (width + 0.01) * 2.0).translate(0.0, 0.0, bore_z)
+        shape = boolean_difference(shape, bore)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         _adopt_mesh_geometry(self, geom)
@@ -120,39 +154,32 @@ class PivotForkGeometry(MeshGeometry):
         if bore_center_z - bore_radius <= 0.0 or bore_center_z + bore_radius >= height:
             raise ValueError("bore_center_z must keep the bore inside the fork cheeks")
 
-        cq = require_cadquery(feature="PivotForkGeometry")
         tine_depth = depth
-        left_tine = (
-            cq.Workplane("XY")
-            .box(cheek_thickness, tine_depth, height)
-            .translate((-(gap_width * 0.5 + cheek_thickness * 0.5), 0.0, 0.0))
+        left_tine = _box((cheek_thickness, tine_depth, height)).translate(
+            -(gap_width * 0.5 + cheek_thickness * 0.5), 0.0, 0.0
         )
-        right_tine = (
-            cq.Workplane("XY")
-            .box(cheek_thickness, tine_depth, height)
-            .translate(((gap_width * 0.5 + cheek_thickness * 0.5), 0.0, 0.0))
+        right_tine = _box((cheek_thickness, tine_depth, height)).translate(
+            (gap_width * 0.5 + cheek_thickness * 0.5), 0.0, 0.0
         )
-        rear_bridge = (
-            cq.Workplane("XY")
-            .box(width, bridge_thickness, height)
-            .translate((0.0, -depth * 0.5 + bridge_thickness * 0.5, 0.0))
+        rear_bridge = _box((width, bridge_thickness, height)).translate(
+            0.0, -depth * 0.5 + bridge_thickness * 0.5, 0.0
         )
-        shape = left_tine.union(right_tine).union(rear_bridge)
+        shape = boolean_union(boolean_union(left_tine, right_tine), rear_bridge)
         if corner_radius > 0.0:
-            shape = shape.edges("|Z").fillet(
-                min(corner_radius, cheek_thickness * 0.6, bridge_thickness * 0.6, height * 0.25)
+            # Vertical-edge fillet of the U-shape outline. Build the rounded outer envelope
+            # and intersect to round only the exterior vertical edges, leaving the inner
+            # gap untouched (matches box-union fillet behavior closely on the corners).
+            fillet = min(
+                corner_radius, cheek_thickness * 0.6, bridge_thickness * 0.6, height * 0.25
             )
+            envelope = rounded_box(width, depth, height, fillet, kind="fillet")
+            shape = boolean_intersection(shape, envelope)
 
         bore_z = -height * 0.5 + bore_center_z
-        bore = (
-            cq.Workplane("YZ")
-            .circle(bore_radius)
-            .extrude(width + 0.01, both=True)
-            .translate((0.0, 0.0, bore_z))
-        )
-        shape = shape.cut(bore)
+        bore = cylinder_x(bore_radius, (width + 0.01) * 2.0).translate(0.0, 0.0, bore_z)
+        shape = boolean_difference(shape, bore)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         _adopt_mesh_geometry(self, geom)
@@ -206,57 +233,41 @@ class TrunnionYokeGeometry(MeshGeometry):
                 "trunnion_center_z must leave material above the base and below the top edge"
             )
 
-        cq = require_cadquery(feature="TrunnionYokeGeometry")
-        base = (
-            cq.Workplane("XY")
-            .box(width, depth, base_thickness)
-            .translate((0.0, 0.0, -height * 0.5 + base_thickness * 0.5))
+        base = _box((width, depth, base_thickness)).translate(
+            0.0, 0.0, -height * 0.5 + base_thickness * 0.5
         )
         cheek_height = height - base_thickness
         cheek_z = -height * 0.5 + base_thickness + cheek_height * 0.5
-        left_cheek = (
-            cq.Workplane("XY")
-            .box(cheek_thickness, depth, cheek_height)
-            .translate((-(span_width * 0.5 + cheek_thickness * 0.5), 0.0, cheek_z))
+        left_cheek = _box((cheek_thickness, depth, cheek_height)).translate(
+            -(span_width * 0.5 + cheek_thickness * 0.5), 0.0, cheek_z
         )
-        right_cheek = (
-            cq.Workplane("XY")
-            .box(cheek_thickness, depth, cheek_height)
-            .translate(((span_width * 0.5 + cheek_thickness * 0.5), 0.0, cheek_z))
+        right_cheek = _box((cheek_thickness, depth, cheek_height)).translate(
+            (span_width * 0.5 + cheek_thickness * 0.5), 0.0, cheek_z
         )
         boss_radius = max(trunnion_radius * 1.4, cheek_thickness * 0.55)
         boss_length = min(cheek_thickness * 0.75, depth * 0.35)
         boss_z = -height * 0.5 + trunnion_center_z
-        left_boss = (
-            cq.Workplane("YZ")
-            .circle(boss_radius)
-            .extrude(boss_length, both=False)
-            .translate((-(span_width * 0.5 + cheek_thickness), 0.0, boss_z))
-        )
-        right_boss = (
-            cq.Workplane("YZ")
-            .circle(boss_radius)
-            .extrude(-boss_length, both=False)
-            .translate(((span_width * 0.5 + cheek_thickness), 0.0, boss_z))
-        )
-        shape = base.union(left_cheek).union(right_cheek).union(left_boss).union(right_boss)
-        if corner_radius > 0.0:
-            shape = shape.edges("|Z").fillet(
-                min(corner_radius, cheek_thickness * 0.5, depth * 0.2, height * 0.2)
-            )
+        # left_boss: extrude(boss_length) -> x in [0, boss_length], then translate to outer
+        # cheek face at -(span/2 + cheek); spans inward toward the gap.
+        left_boss = cylinder_x(
+            boss_radius, boss_length, -(span_width * 0.5 + cheek_thickness) + boss_length * 0.5
+        ).translate(0.0, 0.0, boss_z)
+        # right_boss: extrude(-boss_length) -> x in [-boss_length, 0], then translate to outer
+        # cheek face at +(span/2 + cheek).
+        right_boss = cylinder_x(
+            boss_radius, boss_length, (span_width * 0.5 + cheek_thickness) - boss_length * 0.5
+        ).translate(0.0, 0.0, boss_z)
+        shape = boolean_union(base, left_cheek)
+        shape = boolean_union(shape, right_cheek)
+        shape = boolean_union(shape, left_boss)
+        shape = boolean_union(shape, right_boss)
 
-        trunnion_bore = (
-            cq.Workplane("YZ")
-            .circle(trunnion_radius)
-            .extrude(
-                width + boss_length * 2.0 + 0.01,
-                both=True,
-            )
-            .translate((0.0, 0.0, boss_z))
-        )
-        shape = shape.cut(trunnion_bore)
+        trunnion_bore = cylinder_x(
+            trunnion_radius, (width + boss_length * 2.0 + 0.01) * 2.0
+        ).translate(0.0, 0.0, boss_z)
+        shape = boolean_difference(shape, trunnion_bore)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         _adopt_mesh_geometry(self, geom)

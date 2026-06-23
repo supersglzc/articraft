@@ -39,14 +39,10 @@ def _init_git_repo(repo_root: Path) -> None:
 def _assert_draft_model_scaffold_contract(model_text: str) -> None:
     tree = ast.parse(model_text)
 
-    cadquery_imports = [
-        alias
-        for node in tree.body
-        if isinstance(node, ast.Import)
-        for alias in node.names
-        if alias.name == "cadquery"
+    plain_imports = [
+        alias.name for node in tree.body if isinstance(node, ast.Import) for alias in node.names
     ]
-    assert any(alias.asname == "cq" for alias in cadquery_imports)
+    assert "cadquery" not in plain_imports
 
     sdk_imports = [
         alias.name
@@ -54,7 +50,7 @@ def _assert_draft_model_scaffold_contract(model_text: str) -> None:
         if isinstance(node, ast.ImportFrom) and node.module == "sdk"
         for alias in node.names
     ]
-    assert {"ArticulatedObject", "TestContext", "TestReport", "mesh_from_cadquery"} <= set(
+    assert {"ArticulatedObject", "TestContext", "TestReport", "mesh_from_geometry"} <= set(
         sdk_imports
     )
 

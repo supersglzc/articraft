@@ -4,10 +4,10 @@ GEOMETRY
 - Import public authoring APIs directly from `sdk`.
 - Do not guess Python submodules from docs topic names. For example, use `from sdk import place_on_face`, not `from sdk.placement import place_on_face`.
 - Use primitives only when they represent the visible form credibly. Do not use capped primitive solids as substitutes for visible hollow bodies, cut openings, inset cavities, curved shells, rings, grilles, or layered manufactured panels.
-- Prefer CadQuery for visible geometry that needs lower-level shape control: hollow shells, open-ended cylinders/tubes, cut-through openings, boolean-cut panels, continuous curved forms, lofts, sweeps, recesses, lips, rims, and realistic appliance or machine housings.
-- Mix primitives and CadQuery freely. A good model often uses primitives for hidden/simple structure and CadQuery for the visible parts where primitives would read as placeholders.
+- Prefer mesh geometry (lofts, sweeps, booleans, extrudes) for visible geometry that needs lower-level shape control: hollow shells, open-ended cylinders/tubes, cut-through openings, boolean-cut panels, continuous curved forms, lofts, sweeps, recesses, lips, rims, and realistic appliance or machine housings.
+- Mix primitives and mesh geometry freely. A good model often uses primitives for hidden/simple structure and mesh geometry for the visible parts where primitives would read as placeholders.
 - Match the visible construction logic of the object. If a face should read as one continuous manufactured piece, keep it as a connected face with openings or cutouts instead of rebuilding it from separate floating members. Use separate member-based construction only when the visible form should genuinely read as discrete members.
-- When authoring mesh-backed visuals, use managed logical names like `mesh_from_geometry(..., "door_panel")` or `mesh_from_cadquery(..., "door_panel")`; do not reason about filesystem paths.
+- When authoring mesh-backed visuals, use managed logical names like `mesh_from_geometry(..., "door_panel")`; do not reason about filesystem paths.
 - Author visual geometry only; do not author collision geometry in `sdk`.
 - Preserve correct joint origins, axes, limits, and articulation behavior.
 

@@ -187,12 +187,4 @@ _DOC_PATH_ALIASES = {
     "sdk/_docs/base/47_bezels_and_frames.md": "references/geometry/bezels-and-frames.md",
     "sdk/_docs/base/48_wheels_and_tires.md": "references/geometry/wheels-and-tires.md",
     "sdk/_docs/base/49_hinges.md": "references/geometry/hinges.md",
-    "sdk/_docs/cadquery/35_cadquery.md": "references/cadquery/overview.md",
-    "sdk/_docs/cadquery/36_cadquery_primer.md": "references/cadquery/primer.md",
-    "sdk/_docs/cadquery/37_cadquery_workplane.md": "references/cadquery/workplane.md",
-    "sdk/_docs/cadquery/38_cadquery_sketch.md": "references/cadquery/sketch.md",
-    "sdk/_docs/cadquery/39_cadquery_assembly.md": "references/cadquery/assembly.md",
-    "sdk/_docs/cadquery/39d_cadquery_gears.md": "references/cadquery/gears.md",
-    "sdk/_docs/cadquery/39b_cadquery_free_function.md": "references/cadquery/free-functions.md",
-    "sdk/_docs/cadquery/39c_cadquery_api_ref.md": "references/cadquery/api-ref.md",
 }

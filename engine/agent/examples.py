@@ -13,8 +13,8 @@ _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 _CODE_FENCE_RE = re.compile(r"```[^\n]*\n(?P<code>.*?)```", re.DOTALL)
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _CAMEL_CASE_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
-_NON_DISTINCTIVE_TAG_TOKENS = frozenset({"cadquery", "example", "examples"})
-_NON_DISTINCTIVE_CODE_TOKENS = frozenset({"cq", "false", "none", "result", "self", "true"})
+_NON_DISTINCTIVE_TAG_TOKENS = frozenset({"mesh", "example", "examples"})
+_NON_DISTINCTIVE_CODE_TOKENS = frozenset({"false", "none", "result", "self", "true"})
 _STOPWORD_TOKENS = frozenset(
     {
         "a",
@@ -171,10 +171,7 @@ def examples_root() -> Path:
 
 def example_dirs_for_sdk(sdk_package: str) -> tuple[Path, ...]:
     if sdk_package == "sdk":
-        return (
-            examples_root() / "base",
-            examples_root() / "cadquery",
-        )
+        return (examples_root() / "base",)
     raise ValueError(f"Unsupported SDK package for examples: {sdk_package!r}")
 
 

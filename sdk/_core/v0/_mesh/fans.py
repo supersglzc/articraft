@@ -3,12 +3,25 @@ from __future__ import annotations
 from math import cos, pi, sin, sqrt
 from typing import Optional
 
-from sdk._dependencies import require_cadquery
-
-from .cadquery_helpers import _mesh_geometry_from_cadquery_model
+from .booleans import boolean_difference, boolean_union
 from .common import _EPS
-from .primitives import MeshGeometry, _adopt_mesh_geometry, _mesh_geometry_shifted_to_z0
+from .native_build import annulus, cylinder_z
+from .primitives import (
+    ExtrudeGeometry,
+    LoftGeometry,
+    MeshGeometry,
+    _adopt_mesh_geometry,
+    _mesh_geometry_shifted_to_z0,
+)
 from .specs import FanRotorBlade, FanRotorHub, FanRotorShroud
+
+
+def _circle_pts_z(z: float, radius: float, segments: int = 48) -> list[tuple[float, float, float]]:
+    """A circle of given radius in the plane Z=z (for LoftGeometry sections along Z)."""
+    return [
+        (radius * cos(2.0 * pi * k / segments), radius * sin(2.0 * pi * k / segments), z)
+        for k in range(segments)
+    ]
 
 
 class FanRotorGeometry(MeshGeometry):
@@ -140,8 +153,6 @@ class FanRotorGeometry(MeshGeometry):
                 return min(1.08, 0.82 * t + 0.22 * sin(pi * t))
             return 0.82 * t
 
-        cq = require_cadquery(feature="FanRotorGeometry")
-
         def rotate_section_points(
             points: list[tuple[float, float]],
             angle_rad: float,
@@ -200,37 +211,30 @@ class FanRotorGeometry(MeshGeometry):
         if rear_collar_radius >= hub_radius * 1.05:
             raise ValueError("hub.rear_collar_radius must fit within the hub radius")
 
-        hub_body = cq.Workplane("XY").circle(hub_radius).extrude(hub_body_height * 0.5, both=True)
-        shape = hub_body
+        shape: MeshGeometry = cylinder_z(hub_radius, hub_body_height)
         if rear_collar_height > 1.0e-9:
-            rear_collar = (
-                cq.Workplane("XY")
-                .circle(rear_collar_radius)
-                .extrude(rear_collar_height * 0.5, both=True)
-                .translate((0.0, 0.0, -thickness * 0.24))
-            )
-            shape = shape.union(rear_collar)
+            rear_collar = cylinder_z(rear_collar_radius, rear_collar_height, -thickness * 0.24)
+            shape = boolean_union(shape, rear_collar)
 
         if hub_style == "capped":
-            front_cap = (
-                cq.Workplane("XY")
-                .circle(hub_radius * 0.82)
-                .extrude(max(thickness * 0.18, 1.0e-4))
-                .translate((0.0, 0.0, hub_body_height * 0.5))
+            cap_height = max(thickness * 0.18, 1.0e-4)
+            # one-sided extrude with base at hub front, plus translate by hub_body_height*0.5
+            front_cap = cylinder_z(
+                hub_radius * 0.82, cap_height, hub_body_height * 0.5 + cap_height * 0.5
             )
-            shape = shape.union(front_cap)
+            shape = boolean_union(shape, front_cap)
         elif hub_style in {"domed", "spinner"}:
             front_cap_height = thickness * (0.34 if hub_style == "domed" else 0.52)
             front_top_radius = hub_radius * (0.40 if hub_style == "domed" else 0.05)
-            front_cap = (
-                cq.Workplane("XY")
-                .workplane(offset=hub_body_height * 0.5)
-                .circle(hub_radius * 0.92)
-                .workplane(offset=front_cap_height)
-                .circle(max(front_top_radius, 1.0e-4))
-                .loft(combine=True, ruled=False)
+            base_z = hub_body_height * 0.5
+            top_z = base_z + front_cap_height
+            front_cap = LoftGeometry(
+                [
+                    _circle_pts_z(base_z, hub_radius * 0.92),
+                    _circle_pts_z(top_z, max(front_top_radius, 1.0e-4)),
+                ]
             )
-            shape = shape.union(front_cap)
+            shape = boolean_union(shape, front_cap)
 
         if hub.bore_diameter is not None:
             bore_diameter = float(hub.bore_diameter)
@@ -242,15 +246,9 @@ class FanRotorGeometry(MeshGeometry):
             )
             if bore_radius >= bore_limit * 0.92:
                 raise ValueError("hub.bore_diameter is too large for the hub")
-            bore = (
-                cq.Workplane("XY")
-                .circle(bore_radius)
-                .extrude(
-                    max(thickness * 1.8, hub_body_height + rear_collar_height + shroud_depth),
-                    both=True,
-                )
-            )
-            shape = shape.cut(bore)
+            bore_half = max(thickness * 1.8, hub_body_height + rear_collar_height + shroud_depth)
+            bore = cylinder_z(bore_radius, bore_half * 2.0)
+            shape = boolean_difference(shape, bore)
 
         root_radius = hub_radius * 0.82
         if shroud is not None:
@@ -287,8 +285,11 @@ class FanRotorGeometry(MeshGeometry):
         sweep_amount = blade_span * sin(blade_sweep_deg * pi / 180.0) * 0.34
         section_sweeps = [sweep_amount * sweep_factor(frac) for frac in station_fracs]
 
-        blade_wp = None
-        previous_station = 0.0
+        # Each section lives in a YZ plane at X=station with local coords (y, z).
+        # Build it as a constant-Z loft profile (y, z, station) then rotate the whole
+        # blade with the cyclic (x,y,z)->(z,x,y) map so the loft axis becomes world X
+        # (radial out), giving final coords (X=station, Y=y, Z=z).
+        blade_profiles: list[list[tuple[float, float, float]]] = []
         for station, chord, section_t, pitch_deg, sweep_y, span_t in zip(
             stations,
             section_chords,
@@ -298,47 +299,29 @@ class FanRotorGeometry(MeshGeometry):
             station_fracs,
         ):
             section = blade_section_points(chord, section_t, pitch_deg, sweep_y, span_t)
-            if blade_wp is None:
-                blade_wp = cq.Workplane("YZ").workplane(offset=station).polyline(section).close()
-            else:
-                blade_wp = (
-                    blade_wp.workplane(offset=station - previous_station).polyline(section).close()
-                )
-            previous_station = station
-        assert blade_wp is not None
-        blade_solid = blade_wp.loft(combine=True, ruled=False)
+            blade_profiles.append([(y, z, station) for (y, z) in section])
+        blade_solid = LoftGeometry(blade_profiles).rotate((1.0, 1.0, 1.0), 2.0 * pi / 3.0)
 
-        angle_step = 360.0 / float(blade_count)
+        angle_step = 2.0 * pi / float(blade_count)
         for blade_index in range(blade_count):
-            shape = shape.union(
-                blade_solid.rotate(
-                    (0.0, 0.0, 0.0),
-                    (0.0, 0.0, 1.0),
-                    angle_step * float(blade_index),
-                )
+            shape = boolean_union(
+                shape,
+                blade_solid.copy().rotate_z(angle_step * float(blade_index)),
             )
 
         if shroud is not None:
             assert ring_outer_radius is not None
             assert ring_inner_radius is not None
-            tip_ring = (
-                cq.Workplane("XY")
-                .circle(ring_outer_radius)
-                .circle(ring_inner_radius)
-                .extrude(shroud_depth * 0.5, both=True)
-            )
-            shape = shape.union(tip_ring)
+            tip_ring = annulus(ring_inner_radius, ring_outer_radius, shroud_depth)
+            shape = boolean_union(shape, tip_ring)
             if shroud_lip_depth > 1.0e-9:
-                front_lip = (
-                    cq.Workplane("XY")
-                    .workplane(offset=shroud_depth * 0.5)
-                    .circle(ring_outer_radius)
-                    .circle(ring_inner_radius)
-                    .extrude(shroud_lip_depth)
-                )
-                shape = shape.union(front_lip)
+                # one-sided extrude with base at shroud front face (z=shroud_depth*0.5)
+                front_lip = annulus(
+                    ring_inner_radius, ring_outer_radius, shroud_lip_depth
+                ).translate(0.0, 0.0, shroud_depth * 0.5 + shroud_lip_depth * 0.5)
+                shape = boolean_union(shape, front_lip)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         _adopt_mesh_geometry(self, geom)
@@ -385,38 +368,24 @@ class BlowerWheelGeometry(MeshGeometry):
         if blade_thickness >= radial_span * 0.9:
             raise ValueError("blade_thickness is too large for the blower annulus")
 
-        cq = require_cadquery(feature="BlowerWheelGeometry")
         drum_wall = min(max(blade_thickness * 1.8, radial_span * 0.10), inner_radius * 0.55)
         if drum_wall <= 1e-6 or inner_radius - drum_wall <= 1e-6:
             raise ValueError("inner_radius is too small for the blower drum wall")
-        drum = (
-            cq.Workplane("XY")
-            .circle(inner_radius)
-            .circle(inner_radius - drum_wall)
-            .extrude(width * 0.5, both=True)
-        )
+        shape: MeshGeometry = annulus(inner_radius - drum_wall, inner_radius, width)
 
-        shape = drum
         side_plate_thickness = min(max(blade_thickness * 1.1, width * 0.06), width * 0.16)
         side_plate_inner_radius = max(inner_radius - drum_wall * 0.40, 1.0e-4)
         if backplate:
-            rear_plate = (
-                cq.Workplane("XY")
-                .circle(outer_radius)
-                .circle(side_plate_inner_radius)
-                .extrude(side_plate_thickness, both=False)
-                .translate((0.0, 0.0, -width * 0.5))
-            )
-            shape = shape.union(rear_plate)
+            # one-sided extrude (base at z) then translate by -width*0.5
+            rear_plate = annulus(
+                side_plate_inner_radius, outer_radius, side_plate_thickness
+            ).translate(0.0, 0.0, -width * 0.5 + side_plate_thickness * 0.5)
+            shape = boolean_union(shape, rear_plate)
         if shroud:
-            front_plate = (
-                cq.Workplane("XY")
-                .circle(outer_radius)
-                .circle(side_plate_inner_radius)
-                .extrude(side_plate_thickness, both=False)
-                .translate((0.0, 0.0, width * 0.5 - side_plate_thickness))
-            )
-            shape = shape.union(front_plate)
+            front_plate = annulus(
+                side_plate_inner_radius, outer_radius, side_plate_thickness
+            ).translate(0.0, 0.0, width * 0.5 - side_plate_thickness * 0.5)
+            shape = boolean_union(shape, front_plate)
 
         sweep_rad = blade_sweep_deg * pi / 180.0
         inner_attach_radius = max(inner_radius - drum_wall * 0.08, 1.0e-4)
@@ -502,13 +471,8 @@ class BlowerWheelGeometry(MeshGeometry):
                     passage_center - drum_window_span * 0.5,
                     passage_center + drum_window_span * 0.5,
                 )
-                drum_window = (
-                    cq.Workplane("XY")
-                    .polyline(window_profile)
-                    .close()
-                    .extrude(drum_window_length * 0.5, both=True)
-                )
-                shape = shape.cut(drum_window)
+                drum_window = ExtrudeGeometry(window_profile, drum_window_length)
+                shape = boolean_difference(shape, drum_window)
 
         for blade_index in range(blade_count):
             base_angle = blade_index * angle_step
@@ -523,16 +487,10 @@ class BlowerWheelGeometry(MeshGeometry):
                 annulus_point(outer_attach_radius, base_angle + sweep_rad * 0.72),
             ]
             blade_profile = thicken_centerline(centerline, blade_thickness)
-            blade = (
-                cq.Workplane("XY")
-                .polyline(blade_profile)
-                .close()
-                .extrude(blade_length * 0.5, both=True)
-                .translate((0.0, 0.0, blade_center_z))
-            )
-            shape = shape.union(blade)
+            blade = ExtrudeGeometry(blade_profile, blade_length).translate(0.0, 0.0, blade_center_z)
+            shape = boolean_union(shape, blade)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         _adopt_mesh_geometry(self, geom)

@@ -173,7 +173,109 @@ def _point_inside_manifold(manifold, point: Vec3, *, probe_size: float) -> bool:
     return not (manifold ^ probe).is_empty()
 
 
+def _weld_vf(vp, tri) -> Tuple[List[Vec3], List[Face]]:
+    """Weld a (vertices, triangles) soup onto the OBJ grid; drop degenerate faces."""
+    vp = np.asarray(vp, dtype=np.float64)
+    tri = np.asarray(tri, dtype=np.int64)
+    if vp.size == 0 or tri.size == 0:
+        return [], []
+    vertices: List[Vec3] = []
+    index: dict[Tuple[int, int, int], int] = {}
+
+    def add(point) -> int:
+        key = (
+            _quantize_scalar(point[0], step=_OBJ_QUANT_STEP),
+            _quantize_scalar(point[1], step=_OBJ_QUANT_STEP),
+            _quantize_scalar(point[2], step=_OBJ_QUANT_STEP),
+        )
+        idx = index.get(key)
+        if idx is None:
+            idx = len(vertices)
+            index[key] = idx
+            vertices.append((float(point[0]), float(point[1]), float(point[2])))
+        return idx
+
+    faces: List[Face] = []
+    for a, b, c in tri:
+        ia, ib, ic = add(vp[a]), add(vp[b]), add(vp[c])
+        if ia != ib and ib != ic and ia != ic:
+            faces.append((ia, ib, ic))
+    return vertices, faces
+
+
+def _weld_manifold_mesh(manifold) -> Tuple[List[Vec3], List[Face]]:
+    """manifold3d ``to_mesh`` welded onto the OBJ grid (shared vertices, no re-meshing)."""
+    out_mesh = manifold.to_mesh()
+    return _weld_vf(np.asarray(out_mesh.vert_properties)[:, :3], out_mesh.tri_verts)
+
+
+def _outward_vf(geometry: MeshGeometry):
+    """(vertices, faces) as float/int arrays, re-wound outward (positive signed volume).
+
+    SDK primitives don't share a winding convention (manifold3d auto-orients, so it never
+    mattered), but CGAL's exact booleans need outward-facing inputs.
+    """
+    v = np.asarray(geometry.vertices, dtype=np.float64).reshape(-1, 3)
+    f = np.asarray(geometry.faces, dtype=np.int64).reshape(-1, 3)
+    if f.size:
+        tris = v[f]
+        signed = float(np.einsum("ij,ij->i", tris[:, 0], np.cross(tris[:, 1], tris[:, 2])).sum())
+        if signed < 0.0:
+            f = np.ascontiguousarray(f[:, [0, 2, 1]])
+    return v, f
+
+
+def _cgal_boolean(a: MeshGeometry, b: MeshGeometry, op: str) -> MeshGeometry:
+    """Exact boolean of two clean operands via libigl/CGAL, welded to the grid.
+
+    Used as the robust fallback when manifold3d's fast result is a dirty mesh (coincident
+    faces / T-junctions / pinches, e.g. a pin through stacked knuckles). CGAL uses exact
+    arithmetic on the operand meshes, so the result is a clean, watertight solid. ``op`` is
+    one of ``"union"``, ``"minus"`` (difference), ``"intersect"``.
+    """
+    import igl.copyleft.cgal as _cgal
+
+    va, fa = _outward_vf(a)
+    vb, fb = _outward_vf(b)
+    result = _cgal.mesh_boolean(va, fa, vb, fb, op)
+    vertices, faces = _weld_vf(np.asarray(result[0]), np.asarray(result[1]))
+    return MeshGeometry(vertices=vertices, faces=faces)
+
+
+def _is_closed_manifold(faces: Sequence[Face]) -> bool:
+    """True iff every directed edge appears exactly once and its reverse exactly once.
+
+    That is the definition of a closed, orientable triangle mesh (watertight, no T-junctions,
+    boundaries, or coincident faces) — a precise, heuristic-free test of whether the welded
+    mesh is already clean.
+    """
+    if not faces:
+        return False
+    seen: set[Tuple[int, int]] = set()
+    for a, b, c in faces:
+        for u, v in ((a, b), (b, c), (c, a)):
+            if (u, v) in seen:
+                return False  # duplicated directed edge -> non-manifold
+            seen.add((u, v))
+    return all((v, u) in seen for (u, v) in seen)  # every edge has its reverse
+
+
 def _geometry_from_manifold(manifold) -> MeshGeometry:
+    """Manifold -> clean MeshGeometry. Weld manifold3d's mesh onto the grid (fast, clean for
+    curved/composed solids); if that isn't edge-connected, fall back to coplanar
+    re-triangulation. The boolean ops layer separately upgrades dirty results to exact CGAL.
+    """
+    if manifold is None or manifold.is_empty():
+        return MeshGeometry()
+    welded_vertices, welded_faces = _weld_manifold_mesh(manifold)
+    if _is_closed_manifold(welded_faces):
+        geometry = MeshGeometry(vertices=welded_vertices, faces=welded_faces)
+        _set_manifold_provenance(geometry, manifold)
+        return geometry
+    return _geometry_from_manifold_planar(manifold)
+
+
+def _geometry_from_manifold_planar(manifold) -> MeshGeometry:
     if manifold is None or manifold.is_empty():
         return MeshGeometry()
 
@@ -316,44 +418,55 @@ def _is_expected_boolean_fallback_error(exc: BaseException) -> bool:
     return module_name.startswith("manifold")
 
 
-def boolean_union(a: MeshGeometry, b: MeshGeometry) -> MeshGeometry:
-    """
-    Compute a solid boolean union of two meshes.
+def _boolean(combined, a: MeshGeometry, b: MeshGeometry, cgal_op: str) -> MeshGeometry:
+    """Convert a manifold3d boolean result, upgrading dirty meshes to an exact CGAL boolean.
 
-    Both inputs must be manifold solids. This is an MVP wrapper for clean geometry.
+    manifold3d is fast and clean for most geometry; for structurally complex unions it can
+    emit coincident faces / pinches that won't export as a single watertight body. We detect
+    that from the welded mesh and re-run the boolean exactly with CGAL on the operands.
     """
+    vertices, faces = _weld_manifold_mesh(combined)
+    if _is_closed_manifold(faces):
+        geometry = MeshGeometry(vertices=vertices, faces=faces)
+        _set_manifold_provenance(geometry, combined)
+        return geometry
+    return _cgal_boolean(a, b, cgal_op)
+
+
+def boolean_union(a: MeshGeometry, b: MeshGeometry) -> MeshGeometry:
+    """Solid boolean union of two manifold meshes."""
     ma = _manifold_from_geometry(a, name="a")
     mb = _manifold_from_geometry(b, name="b")
-    return _geometry_from_manifold(ma + mb)
+    return _boolean(ma + mb, a, b, "union")
 
 
 def _boolean_union_many(geometries: Sequence[MeshGeometry]) -> MeshGeometry:
     combined = _m3d.Manifold()
     for idx, geometry in enumerate(geometries):
         combined = combined + _manifold_from_geometry(geometry, name=f"geometry[{idx}]")
-    return _geometry_from_manifold(combined)
+    vertices, faces = _weld_manifold_mesh(combined)
+    if _is_closed_manifold(faces):
+        geometry = MeshGeometry(vertices=vertices, faces=faces)
+        _set_manifold_provenance(geometry, combined)
+        return geometry
+    result = geometries[0]
+    for other in geometries[1:]:
+        result = _cgal_boolean(result, other, "union")
+    return result
 
 
 def boolean_difference(a: MeshGeometry, b: MeshGeometry) -> MeshGeometry:
-    """
-    Compute a solid boolean difference: ``a - b``.
-
-    Both inputs must be manifold solids. This is an MVP wrapper for clean geometry.
-    """
+    """Solid boolean difference ``a - b`` of two manifold meshes."""
     ma = _manifold_from_geometry(a, name="a")
     mb = _manifold_from_geometry(b, name="b")
-    return _geometry_from_manifold(ma - mb)
+    return _boolean(ma - mb, a, b, "minus")
 
 
 def boolean_intersection(a: MeshGeometry, b: MeshGeometry) -> MeshGeometry:
-    """
-    Compute a solid boolean intersection of two meshes.
-
-    Both inputs must be manifold solids. This is an MVP wrapper for clean geometry.
-    """
+    """Solid boolean intersection of two manifold meshes."""
     ma = _manifold_from_geometry(a, name="a")
     mb = _manifold_from_geometry(b, name="b")
-    return _geometry_from_manifold(ma ^ mb)
+    return _boolean(ma ^ mb, a, b, "intersect")
 
 
 def mesh_from_geometry(

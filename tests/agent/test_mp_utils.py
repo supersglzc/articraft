@@ -80,8 +80,8 @@ def test_get_mp_context_preloads_forkserver_modules(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(mp_utils.mp, "get_context", fake_get_context)
 
-    context = mp_utils.get_mp_context(forkserver_preload=["cadquery", "OCP"])
+    context = mp_utils.get_mp_context(forkserver_preload=["sdk", "manifold3d"])
 
     assert context is sentinel
     assert captured["method"] == "forkserver"
-    assert captured["modules"] == ["cadquery", "OCP"]
+    assert captured["modules"] == ["sdk", "manifold3d"]

@@ -77,8 +77,17 @@ def _draft_model_template(*, sdk_package: str) -> str:
 # The target prompt for this record is stored in prompt.txt.
 # Extend this scaffold with a valid Articraft model implementation.
 
-import cadquery as cq
-from {sdk_package} import ArticulatedObject, TestContext, TestReport, mesh_from_cadquery
+from {sdk_package} import (
+    ArticulatedObject,
+    BoxGeometry,
+    CylinderGeometry,
+    SphereGeometry,
+    TestContext,
+    TestReport,
+    boolean_difference,
+    boolean_union,
+    mesh_from_geometry,
+)
 
 
 def build_object_model() -> ArticulatedObject:

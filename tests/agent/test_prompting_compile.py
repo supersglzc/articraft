@@ -22,7 +22,7 @@ CORE_CONCEPTS = (
     "REALISTIC GEOMETRY",
     "Assign plausible colors and materials",
     "Do not remove, cap, fuse, or simplify prompt-critical visible geometry",
-    "Prefer CadQuery for visible geometry",
+    "Prefer mesh geometry (lofts, sweeps, booleans, extrudes) for visible geometry",
     "probe_model",
     "find_examples",
     "Never answer with code directly in the assistant response.",

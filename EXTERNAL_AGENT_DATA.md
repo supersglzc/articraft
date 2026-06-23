@@ -23,7 +23,7 @@ engine/agent/prompts/sections/link_naming.md
 
 These define the non-negotiable quality bar: realistic geometry, primary user-facing articulation, no floating parts, no unintentional overlaps, prompt-specific tests, and concise semantic link names.
 
-Quality and realism are very important here. Use every appropriate modeling tool available in the SDK and repository docs to make the geometry read as the real object, not a placeholder. For example, things that are hollow should be modeled as hollow; curved, tapered, beveled, perforated, soft, transparent, or compound forms should use suitable primitives, CadQuery geometry, lofts, sweeps, booleans, mesh helpers, colors, and materials instead of boxy approximations when the real object needs more detail.
+Quality and realism are very important here. Use every appropriate modeling tool available in the SDK and repository docs to make the geometry read as the real object, not a placeholder. For example, things that are hollow should be modeled as hollow; curved, tapered, beveled, perforated, soft, transparent, or compound forms should use suitable primitives, mesh geometry, lofts, sweeps, booleans, mesh helpers, colors, and materials instead of boxy approximations when the real object needs more detail.
 
 Then use the SDK docs and examples while you author:
 

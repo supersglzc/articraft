@@ -1,25 +1,40 @@
 from __future__ import annotations
 
-from math import cos, pi, sin
+from math import cos, pi, radians, sin
 from typing import List, Optional, Sequence, Union
 
-from sdk._dependencies import require_cadquery
-
-from .cadquery_helpers import _mesh_geometry_from_cadquery_model
+from .booleans import boolean_difference, boolean_union
 from .common import _copy_manifold_provenance
+from .native_build import cylinder_z, prism_yz, rounded_box
 from .primitives import (
+    BoxGeometry,
+    ExtrudeGeometry,
     MeshGeometry,
     _adopt_mesh_geometry,
     _centered_axis_positions,
     _mesh_geometry_shifted_to_z0,
     _normalize_pitch_2d,
 )
+from .shape_helpers import _rounded_slot_profile
 from .specs import (
     VentGrilleFrame,
     VentGrilleMounts,
     VentGrilleSlats,
     VentGrilleSleeve,
 )
+
+
+def _box_cut_z(width: float, height: float, depth: float) -> MeshGeometry:
+    """A centered rectangular prism extruded along Z, for boolean cut/union tools.
+
+    Uses ``ExtrudeGeometry`` rather than ``BoxGeometry``: the manifold boolean leaves
+    phantom interior bodies / degenerate slivers when an axis-aligned ``BoxGeometry``
+    (coplanar faces) is used as a cut or as a near-coincident union piece, whereas an
+    extruded-rect prism resolves cleanly.
+    """
+    w, h = width * 0.5, height * 0.5
+    rect = [(-w, -h), (w, -h), (w, h), (-w, h)]
+    return ExtrudeGeometry(rect, depth)
 
 
 class LouverPanelGeometry(MeshGeometry):
@@ -81,25 +96,31 @@ class LouverPanelGeometry(MeshGeometry):
 
         fin_t = float(fin_thickness) if fin_thickness is not None else t * 0.35
         fin_t = max(1e-4, fin_t)
-        cq = require_cadquery(feature="LouverPanelGeometry")
-        shape = cq.Workplane("XY").box(panel_w, panel_h, t)
         if corner_radius > 0.0:
-            shape = shape.edges("|Z").fillet(min(corner_radius, panel_w * 0.5, panel_h * 0.5))
+            shape: MeshGeometry = rounded_box(
+                panel_w,
+                panel_h,
+                t,
+                min(corner_radius, panel_w * 0.5, panel_h * 0.5),
+                kind="fillet",
+            )
+        else:
+            shape = BoxGeometry((panel_w, panel_h, t))
 
         slot_depth = t + max(0.002, t * 0.5)
         slat_span = min(inner_w + frame * 0.35, panel_w - 2.0e-4)
         slat_z = -t * 0.05
 
         for row_y in slat_rows:
-            slot = cq.Workplane("XY").box(slot_w, slot_h, slot_depth).translate((0.0, row_y, 0.0))
-            shape = shape.cut(slot)
+            slot = _box_cut_z(slot_w, slot_h, slot_depth).translate(0.0, row_y, 0.0)
+            shape = boolean_difference(shape, slot)
 
-            slat = cq.Workplane("XY").box(slat_span, slat_w, fin_t)
-            slat = slat.rotate((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), -float(slat_angle_deg))
-            slat = slat.translate((0.0, row_y + slot_h * 0.20, slat_z))
-            shape = shape.union(slat)
+            slat = BoxGeometry((slat_span, slat_w, fin_t))
+            slat = slat.rotate((1.0, 0.0, 0.0), radians(-float(slat_angle_deg)))
+            slat = slat.translate(0.0, row_y + slot_h * 0.20, slat_z)
+            shape = boolean_union(shape, slat)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom.translate(0.0, 0.0, t * 0.5)
         self.vertices = [tuple(vertex) for vertex in geom.vertices]
@@ -251,36 +272,39 @@ class VentGrilleGeometry(MeshGeometry):
                 ):
                     raise ValueError("mounts.inset places holes outside the face")
 
-        cq = require_cadquery(feature="VentGrilleGeometry")
-        shape = cq.Workplane("XY").box(panel_w, panel_h, face_t)
         if corner_radius > 0.0:
-            shape = shape.edges("|Z").fillet(
-                min(corner_radius, panel_w * 0.5 - frame, panel_h * 0.5 - frame)
+            shape: MeshGeometry = rounded_box(
+                panel_w,
+                panel_h,
+                face_t,
+                min(corner_radius, panel_w * 0.5 - frame, panel_h * 0.5 - frame),
+                kind="fillet",
             )
-        if frame_style == "beveled" and frame_depth > 1.0e-9:
-            shape = shape.edges(">Z").chamfer(min(frame_depth, frame * 0.7, face_t * 0.7))
-        elif frame_style == "radiused" and frame_depth > 1.0e-9:
-            shape = shape.edges(">Z").fillet(min(frame_depth, frame * 0.7, face_t * 0.48))
+        else:
+            shape = BoxGeometry((panel_w, panel_h, face_t))
+        # cq `.edges(">Z").chamfer/fillet` are top-face (3D) edge rounds we don't support;
+        # they are cosmetic frame_profile bevels, so skip them (beveled/radiused -> flush).
 
-        shape = shape.cut(
-            cq.Workplane("XY").box(
+        shape = boolean_difference(
+            shape,
+            _box_cut_z(
                 opening_w,
                 opening_h,
                 face_t + max(0.002, face_t * 0.5),
-            )
+            ),
         )
 
         if sleeve_style != "none":
-            duct_outer = cq.Workplane("XY").box(opening_w, opening_h, sleeve_depth)
-            duct_inner = cq.Workplane("XY").box(
+            duct_outer = _box_cut_z(opening_w, opening_h, sleeve_depth)
+            duct_inner = _box_cut_z(
                 opening_w - 2.0 * sleeve_wall,
                 opening_h - 2.0 * sleeve_wall,
                 sleeve_depth + face_t + 0.004,
             )
-            duct_shell = duct_outer.cut(duct_inner).translate(
-                (0.0, 0.0, -face_t * 0.5 - sleeve_depth * 0.5 + min(face_t * 0.25, 0.001))
+            duct_shell = boolean_difference(duct_outer, duct_inner).translate(
+                0.0, 0.0, -face_t * 0.5 - sleeve_depth * 0.5 + min(face_t * 0.25, 0.001)
             )
-            shape = shape.union(duct_shell)
+            shape = boolean_union(shape, duct_shell)
 
         slat_embed = min(frame * 0.5, 0.002)
         slat_clear_w = opening_w - max(0.0, divider_count * divider_width)
@@ -288,13 +312,20 @@ class VentGrilleGeometry(MeshGeometry):
         slat_z = -face_t * 0.25 - slat_inset
         slat_angle = abs(float(slat_angle_deg)) * (-1.0 if slat_direction == "down" else 1.0)
 
-        def _make_slat():
+        def _make_slat() -> MeshGeometry:
+            # Rectangular slats are built as (y, z) prisms extruded along X (not
+            # BoxGeometry) so they union with the frame without manifold erosion.
             if slat_profile == "flat":
-                return cq.Workplane("XY").box(slat_chord, slat_w, slat_t)
+                hw, ht = slat_w * 0.5, slat_t * 0.5
+                rect = [(-hw, -ht), (hw, -ht), (hw, ht), (-hw, ht)]
+                return prism_yz(rect, slat_chord)
             if slat_profile == "boxed":
                 box_t = max(slat_t * 1.35, slat_w * 0.42)
-                return cq.Workplane("XY").box(slat_chord, slat_w, box_t)
+                hw, ht = slat_w * 0.5, box_t * 0.5
+                rect = [(-hw, -ht), (hw, -ht), (hw, ht), (-hw, ht)]
+                return prism_yz(rect, slat_chord)
 
+            # Airfoil section profiled in (y, z) and extruded along X (cq YZ workplane).
             section_points = [
                 (-0.50 * slat_w, 0.00),
                 (-0.22 * slat_w, 0.56 * slat_t),
@@ -304,19 +335,13 @@ class VentGrilleGeometry(MeshGeometry):
                 (-0.10 * slat_w, -0.38 * slat_t),
                 (-0.44 * slat_w, -0.14 * slat_t),
             ]
-            return (
-                cq.Workplane("YZ")
-                .workplane(offset=-slat_chord * 0.5)
-                .polyline(section_points)
-                .close()
-                .extrude(slat_chord)
-            )
+            return prism_yz(section_points, slat_chord)
 
         for row_y in slat_rows:
             slat = _make_slat()
-            slat = slat.rotate((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), slat_angle)
-            slat = slat.translate((0.0, row_y, slat_z))
-            shape = shape.union(slat)
+            slat = slat.rotate((1.0, 0.0, 0.0), radians(slat_angle))
+            slat = slat.translate(0.0, row_y, slat_z)
+            shape = boolean_union(shape, slat)
 
         if divider_count > 0:
             divider_positions = _centered_axis_positions(
@@ -331,22 +356,21 @@ class VentGrilleGeometry(MeshGeometry):
             divider_depth = max(face_t * 0.90, slat_t * 1.10)
             divider_span_y = opening_h + min(frame * 0.35, 0.003)
             for x_pos in divider_positions[:divider_count]:
-                divider = cq.Workplane("XY").box(divider_width, divider_span_y, divider_depth)
-                divider = divider.translate((x_pos, 0.0, -face_t * 0.18))
-                shape = shape.union(divider)
+                # Extruded-rect prism (not BoxGeometry) so the divider tips that poke
+                # into the frame union cleanly instead of leaving degenerate slivers.
+                divider = _box_cut_z(divider_width, divider_span_y, divider_depth)
+                divider = divider.translate(x_pos, 0.0, -face_t * 0.18)
+                shape = boolean_union(shape, divider)
 
         if mount_style != "none":
             hole_depth = face_t + max(sleeve_depth, 0.0) + 0.01
             for hole_x, hole_y in mount_positions:
-                hole = (
-                    cq.Workplane("XY")
-                    .circle(mount_hole_diameter * 0.5)
-                    .extrude(hole_depth * 0.5, both=True)
-                    .translate((hole_x, hole_y, -max(sleeve_depth, 0.0) * 0.5))
+                hole = cylinder_z(mount_hole_diameter * 0.5, hole_depth).translate(
+                    hole_x, hole_y, -max(sleeve_depth, 0.0) * 0.5
                 )
-                shape = shape.cut(hole)
+                shape = boolean_difference(shape, hole)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         self.vertices = [tuple(vertex) for vertex in geom.vertices]
@@ -416,30 +440,27 @@ class PerforatedPanelGeometry(MeshGeometry):
                 "No perforation columns fit panel; increase panel size or reduce pitch"
             )
 
-        cq = require_cadquery(feature="PerforatedPanelGeometry")
-        shape = cq.Workplane("XY").box(panel_w, panel_h, thickness)
         if corner_radius > 0.0:
-            shape = shape.edges("|Z").fillet(
-                min(corner_radius, panel_w * 0.5 - 1e-4, panel_h * 0.5 - 1e-4)
+            shape: MeshGeometry = rounded_box(
+                panel_w,
+                panel_h,
+                thickness,
+                min(corner_radius, panel_w * 0.5 - 1e-4, panel_h * 0.5 - 1e-4),
+                kind="fillet",
             )
+        else:
+            shape = BoxGeometry((panel_w, panel_h, thickness))
 
         cut_depth = thickness + max(0.002, thickness * 0.5)
-        cut_shape = None
+        cut_shape: Optional[MeshGeometry] = None
         for row_points in point_rows:
-            row_cut = (
-                cq.Workplane("XY")
-                .pushPoints(row_points)
-                .circle(hole_radius)
-                .extrude(
-                    cut_depth,
-                    both=True,
-                )
-            )
-            cut_shape = row_cut if cut_shape is None else cut_shape.union(row_cut)
+            for x_pos, y_pos in row_points:
+                hole = cylinder_z(hole_radius, 2.0 * cut_depth).translate(x_pos, y_pos, 0.0)
+                cut_shape = hole if cut_shape is None else boolean_union(cut_shape, hole)
         if cut_shape is not None:
-            shape = shape.cut(cut_shape)
+            shape = boolean_difference(shape, cut_shape)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         _adopt_mesh_geometry(self, geom)
@@ -519,54 +540,37 @@ class SlotPatternPanelGeometry(MeshGeometry):
         if not point_rows:
             raise ValueError("No slot columns fit panel; increase panel size or reduce pitch")
 
-        cq = require_cadquery(feature="SlotPatternPanelGeometry")
-        shape = cq.Workplane("XY").box(panel_w, panel_h, thickness)
-        if corner_radius > 0.0:
-            shape = shape.edges("|Z").fillet(
-                min(corner_radius, panel_w * 0.5 - 1e-4, panel_h * 0.5 - 1e-4)
-            )
-
         cut_depth = thickness + max(0.002, thickness * 0.5)
-        slot_core_length = max(slot_length - slot_width, 0.0)
+        # Build the rounded slot (core + end caps) as a single extruded profile. A
+        # box-core + cylinder-cap union as a cut tool leaves manifold phantom bodies;
+        # one rounded-rect prism subtracts cleanly to a real through-slot.
+        slot_profile = _rounded_slot_profile(slot_length, slot_width)
 
-        def build_slot_cut(center_xy: tuple[float, float]):
-            slot_cut = None
-            if slot_core_length > 1e-6:
-                slot_cut = cq.Workplane("XY").box(slot_core_length, slot_width, cut_depth)
-            cap_radius = slot_width * 0.5
-            cap_offset = slot_core_length * 0.5
-            left_cap = (
-                cq.Workplane("XY")
-                .circle(cap_radius)
-                .extrude(cut_depth, both=True)
-                .translate((-cap_offset, 0.0, 0.0))
-            )
-            right_cap = (
-                cq.Workplane("XY")
-                .circle(cap_radius)
-                .extrude(
-                    cut_depth,
-                    both=True,
-                )
-                .translate((cap_offset, 0.0, 0.0))
-            )
-            slot_cut = (
-                left_cap.union(right_cap)
-                if slot_cut is None
-                else slot_cut.union(left_cap).union(right_cap)
-            )
-            slot_cut = slot_cut.rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), slot_angle_deg)
-            return slot_cut.translate((center_xy[0], center_xy[1], 0.0))
+        def build_slot_cut(center_xy: tuple[float, float]) -> MeshGeometry:
+            slot_cut = ExtrudeGeometry(slot_profile, 2.0 * cut_depth)
+            slot_cut = slot_cut.rotate((0.0, 0.0, 1.0), radians(slot_angle_deg))
+            return slot_cut.translate(center_xy[0], center_xy[1], 0.0)
 
-        cut_shape = None
+        if corner_radius > 0.0:
+            shape: MeshGeometry = rounded_box(
+                panel_w,
+                panel_h,
+                thickness,
+                min(corner_radius, panel_w * 0.5 - 1e-4, panel_h * 0.5 - 1e-4),
+                kind="fillet",
+            )
+        else:
+            shape = BoxGeometry((panel_w, panel_h, thickness))
+
+        cut_shape: Optional[MeshGeometry] = None
         for row_points in point_rows:
             for point in row_points:
                 slot_cut = build_slot_cut(point)
-                cut_shape = slot_cut if cut_shape is None else cut_shape.union(slot_cut)
+                cut_shape = slot_cut if cut_shape is None else boolean_union(cut_shape, slot_cut)
         if cut_shape is not None:
-            shape = shape.cut(cut_shape)
+            shape = boolean_difference(shape, cut_shape)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         _adopt_mesh_geometry(self, geom)

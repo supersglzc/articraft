@@ -62,17 +62,6 @@ _BASE_DOCS = (
     Path("sdk/_docs/base/49_hinges.md"),
 )
 
-_CADQUERY_DOCS = (
-    Path("sdk/_docs/cadquery/35_cadquery.md"),
-    Path("sdk/_docs/cadquery/36_cadquery_primer.md"),
-    Path("sdk/_docs/cadquery/37_cadquery_workplane.md"),
-    Path("sdk/_docs/cadquery/38_cadquery_sketch.md"),
-    Path("sdk/_docs/cadquery/39_cadquery_assembly.md"),
-    Path("sdk/_docs/cadquery/39d_cadquery_gears.md"),
-    Path("sdk/_docs/cadquery/39b_cadquery_free_function.md"),
-    Path("sdk/_docs/cadquery/39c_cadquery_api_ref.md"),
-)
-
 _SDK_PACKAGE_ALIASES = {
     "": "sdk",
     "base": "sdk",
@@ -84,10 +73,9 @@ SDK_PROFILES: dict[str, SdkProfile] = {
     "sdk": SdkProfile(
         package_name="sdk",
         scaffold_path=Path("sdk/scaffold.py"),
-        docs_full=_COMMON_DOCS[:4] + _BASE_DOCS + _CADQUERY_DOCS + _COMMON_DOCS[4:],
+        docs_full=_COMMON_DOCS[:4] + _BASE_DOCS + _COMMON_DOCS[4:],
         docs_core=(
             Path("sdk/_docs/common/00_quickstart.md"),
-            Path("sdk/_docs/cadquery/35_cadquery.md"),
             Path("sdk/_docs/common/70_probe_tooling.md"),
             Path("sdk/_docs/common/80_testing.md"),
         ),

@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-from contextlib import suppress
-from math import cos, pi, sin
+from math import cos, pi, radians, sin
 from typing import Literal, Optional, Sequence, Union
 
 import numpy as np
 
-from sdk._dependencies import require_cadquery
-
-from .cadquery_helpers import (
+from .booleans import boolean_difference, boolean_union
+from .native_build import cylinder_z
+from .primitives import (
+    ExtrudeGeometry,
+    LatheGeometry,
+    LoftGeometry,
+    MeshGeometry,
+    _adopt_mesh_geometry,
+    _mesh_geometry_shifted_to_z0,
+)
+from .shape_helpers import (
     _centered_pattern_positions,
-    _cq_ring_solid,
-    _cut_with_pattern,
-    _loft_between_radii_z,
-    _mesh_geometry_from_cadquery_model,
     _shape_profile_points_2d,
     _shape_size_from_wall,
 )
-from .primitives import MeshGeometry, _adopt_mesh_geometry, _mesh_geometry_shifted_to_z0
 from .specs import (
     BezelCutout,
     BezelEdgeFeature,
@@ -33,6 +35,103 @@ from .specs import (
     KnobSkirt,
     KnobTopFeature,
 )
+
+
+def _box(sx: float, sy: float, sz: float) -> MeshGeometry:
+    """Outward-wound rectangular prism for use as a boolean tool (avoids inward BoxGeometry)."""
+    half_x = sx * 0.5
+    half_y = sy * 0.5
+    rect = [
+        (-half_x, -half_y),
+        (half_x, -half_y),
+        (half_x, half_y),
+        (-half_x, half_y),
+    ]
+    return ExtrudeGeometry(rect, sz)
+
+
+def _polygon_extrude(points: Sequence[tuple[float, float]], height: float) -> MeshGeometry:
+    """Extrude a closed 2D profile one-sided along +Z (``polyline(pts).close().extrude(h)``)."""
+    return ExtrudeGeometry(points, height).translate(0.0, 0.0, height * 0.5)
+
+
+def _natural_cubic_samples(
+    zs: Sequence[float], rs: Sequence[float], *, factor: int = 4
+) -> list[tuple[float, float]]:
+    """Densify (z, r) control points with a natural cubic spline.
+
+    cq lofted its circle sections with ``ruled=False`` (a smooth BSpline through the
+    sections). A straight-segment lathe cuts the spline's corners, so resample the
+    silhouette through a natural cubic spline to recover the bulged profile.
+    """
+    z = np.asarray(zs, dtype=float)
+    r = np.asarray([max(1.0e-4, float(value)) for value in rs], dtype=float)
+    n = z.size
+    if n < 3:
+        return [(float(zi), float(ri)) for zi, ri in zip(z, r)]
+    h = np.diff(z)
+    matrix = np.zeros((n, n))
+    rhs = np.zeros(n)
+    matrix[0, 0] = 1.0
+    matrix[-1, -1] = 1.0
+    for i in range(1, n - 1):
+        matrix[i, i - 1] = h[i - 1]
+        matrix[i, i] = 2.0 * (h[i - 1] + h[i])
+        matrix[i, i + 1] = h[i]
+        rhs[i] = 3.0 * ((r[i + 1] - r[i]) / h[i] - (r[i] - r[i - 1]) / h[i - 1])
+    c = np.linalg.solve(matrix, rhs)
+
+    def evaluate(value: float) -> float:
+        i = int(min(max(np.searchsorted(z, value) - 1, 0), n - 2))
+        dz = value - z[i]
+        b = (r[i + 1] - r[i]) / h[i] - h[i] * (2.0 * c[i] + c[i + 1]) / 3.0
+        d = (c[i + 1] - c[i]) / (3.0 * h[i])
+        return float(r[i] + b * dz + c[i] * dz * dz + d * dz**3)
+
+    dense = np.linspace(z[0], z[-1], factor * (n - 1) + 1)
+    return [(float(value), max(1.0e-4, evaluate(float(value)))) for value in dense]
+
+
+def _frustum_z(
+    radii_and_offsets: Sequence[tuple[float, float]], *, segments: int = 128
+) -> MeshGeometry:
+    """Solid revolved between circle sections along Z (replaces ``_loft_between_radii_z``).
+
+    For three or more sections the silhouette is resampled through a natural cubic
+    spline to mirror cq's ``loft(ruled=False)``; two-section frustums stay linear.
+    """
+    zs = [offset for _radius, offset in radii_and_offsets]
+    rs = [radius for radius, _offset in radii_and_offsets]
+    samples = _natural_cubic_samples(zs, rs)
+    profile: list[tuple[float, float]] = [(0.0, samples[0][0])]
+    for z_value, radius in samples:
+        profile.append((max(1.0e-4, radius), z_value))
+    profile.append((0.0, samples[-1][0]))
+    return LatheGeometry(profile, segments=segments)
+
+
+def _ring_solid(
+    outer_points: Sequence[tuple[float, float]],
+    inner_points: Sequence[tuple[float, float]],
+    depth: float,
+    *,
+    center: bool = True,
+) -> MeshGeometry:
+    """Extrude an outer profile and subtract an inner profile (replaces ``_cq_ring_solid``)."""
+    outer = ExtrudeGeometry(outer_points, depth, center=center)
+    inner_height = depth + max(0.002, depth * 0.5)
+    inner = ExtrudeGeometry(inner_points, inner_height, center=center)
+    return boolean_difference(outer, inner)
+
+
+def _circle_section_z(
+    z: float, radius: float, segments: int = 64
+) -> list[tuple[float, float, float]]:
+    """A circle of given radius at height z (for LoftGeometry sections along Z)."""
+    return [
+        (radius * cos(2.0 * pi * k / segments), radius * sin(2.0 * pi * k / segments), z)
+        for k in range(segments)
+    ]
 
 
 class KnobGeometry(MeshGeometry):
@@ -104,8 +203,6 @@ class KnobGeometry(MeshGeometry):
         for relief in body_reliefs:
             if relief.depth < 0.0:
                 raise ValueError("KnobRelief.depth must be non-negative")
-
-        cq = require_cadquery(feature="KnobGeometry")
 
         body_height = height
         body_bottom = -height * 0.5
@@ -208,53 +305,39 @@ class KnobGeometry(MeshGeometry):
             (max(0.001, body_radius_at(offset / body_height)), body_bottom + offset)
             for offset in section_offsets
         ]
-        wp = None
-        previous_offset = 0.0
-        for radius, offset in radii_and_offsets:
-            t = (offset - body_bottom) / body_height if body_height > 1e-9 else 0.0
-            profile_points = section_outline(radius, t)
-            if wp is None:
-                wp = cq.Workplane("XY").workplane(offset=offset)
-            else:
-                wp = wp.workplane(offset=offset - previous_offset)
-            if profile_points is None:
-                wp = wp.circle(radius)
-            else:
-                wp = wp.polyline(profile_points).close()
-            previous_offset = offset
-        if wp is None:
-            raise ValueError("KnobGeometry requires at least one loft section")
-        shape = wp.loft(combine=True, ruled=False)
+        # cq lofted the circle/polygon sections; build the equivalent native loft of
+        # constant-z section loops. Circular sections become LatheGeometry (smoother and
+        # always manifold); non-circular families loft their explicit point loops.
+        if body_style in {"faceted", "lobed"}:
+            loft_sections: list[list[tuple[float, float, float]]] = []
+            for radius, offset in radii_and_offsets:
+                t = (offset - body_bottom) / body_height if body_height > 1e-9 else 0.0
+                profile_points = section_outline(radius, t)
+                if profile_points is None:
+                    profile_points = [
+                        (radius * cos(2.0 * pi * k / 64), radius * sin(2.0 * pi * k / 64))
+                        for k in range(64)
+                    ]
+                loft_sections.append([(px, py, offset) for px, py in profile_points])
+            shape: MeshGeometry = LoftGeometry(loft_sections)
+        else:
+            shape = _frustum_z(radii_and_offsets)
 
         if skirt is not None:
             skirt_radius = skirt.diameter * 0.5
             skirt_bottom = body_bottom - skirt.height
-            skirt_shape = _loft_between_radii_z(
-                cq,
+            skirt_shape = _frustum_z(
                 [
                     (max(0.001, skirt_radius * (1.0 + skirt.flare)), skirt_bottom),
                     (max(0.001, skirt_radius), body_bottom),
-                ],
+                ]
             )
-            shape = shape.union(skirt_shape)
-            if skirt.chamfer > 1e-6:
-                with suppress(Exception):
-                    shape = (
-                        shape.faces("<Z")
-                        .edges()
-                        .chamfer(min(skirt.chamfer, skirt.height * 0.7, skirt_radius * 0.25))
-                    )
+            shape = boolean_union(shape, skirt_shape)
+            # cq ``faces("<Z").edges().chamfer(...)`` on the skirt bottom is a cosmetic 3D
+            # edge round and is unsupported in the native layer -> SKIP.
 
-        if edge_radius > 0.0:
-            with suppress(Exception):
-                shape = shape.edges("|Z").fillet(min(edge_radius, max_radius * 0.35, height * 0.18))
-        if crown_radius > 0.0:
-            with suppress(Exception):
-                shape = (
-                    shape.faces(">Z")
-                    .edges()
-                    .fillet(min(crown_radius, max_radius * 0.25, height * 0.16))
-                )
+        # cq ``edges("|Z").fillet`` and ``faces(">Z").edges().fillet`` are cosmetic 3D edge
+        # rounds with no native equivalent -> SKIP (edge_radius / crown_radius).
 
         if grip.style != "none" and grip.depth > 1e-6:
             grip_count = grip.count or (28 if grip.style in {"knurled", "diamond_knurl"} else 18)
@@ -272,21 +355,17 @@ class KnobGeometry(MeshGeometry):
             if grip_width <= 0.0:
                 raise ValueError("KnobGrip.width must be positive when provided")
 
-            cutters: list[object] = []
             if grip.style in {"fluted", "scalloped", "ribbed"}:
                 cutter_radius = grip_width * (0.55 if grip.style != "ribbed" else 0.38)
                 radial_center = max_radius + cutter_radius - grip.depth
+                cut_len = height + (skirt.height if skirt is not None else 0.0) + 0.01
                 for index in range(grip_count):
                     cutter = (
-                        cq.Workplane("XY")
-                        .circle(cutter_radius)
-                        .extrude(
-                            height + (skirt.height if skirt is not None else 0.0) + 0.01, both=True
-                        )
-                        .translate((radial_center, 0.0, body_bottom + height * 0.5))
-                        .rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 360.0 * index / float(grip_count))
+                        cylinder_z(cutter_radius, 2.0 * cut_len)
+                        .translate(radial_center, 0.0, body_bottom + height * 0.5)
+                        .rotate((0.0, 0.0, 1.0), radians(360.0 * index / float(grip_count)))
                     )
-                    cutters.append(cutter)
+                    shape = boolean_difference(shape, cutter)
             else:
                 tangential = max(grip_width, max_radius * 0.06)
                 radial = max(grip.depth * 1.8, max_radius * 0.06)
@@ -296,18 +375,14 @@ class KnobGeometry(MeshGeometry):
                     base_angle = 360.0 * index / float(grip_count)
                     for tilt_sign in (-1.0, 1.0) if grip.style == "diamond_knurl" else (1.0,):
                         cutter = (
-                            cq.Workplane("XY")
-                            .box(radial, tangential, box_height)
+                            _box(radial, tangential, box_height)
                             .translate(
-                                (max_radius - grip.depth * 0.5, 0.0, body_bottom + height * 0.5)
+                                max_radius - grip.depth * 0.5, 0.0, body_bottom + height * 0.5
                             )
-                            .rotate(
-                                (0.0, 0.0, 0.0), (0.0, 1.0, 0.0), helix_angle * float(tilt_sign)
-                            )
-                            .rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), base_angle)
+                            .rotate((0.0, 1.0, 0.0), radians(helix_angle * float(tilt_sign)))
+                            .rotate((0.0, 0.0, 1.0), radians(base_angle))
                         )
-                        cutters.append(cutter)
-            shape = _cut_with_pattern(shape, cutters)
+                        shape = boolean_difference(shape, cutter)
 
         if indicator.style != "none":
             indicator_length = indicator.length or max(diameter * 0.34, 0.003)
@@ -315,10 +390,8 @@ class KnobGeometry(MeshGeometry):
             indicator_depth = max(indicator.depth, max(height * 0.03, 0.0008))
             top_z = body_bottom + height
             if indicator.style in {"line", "notch"}:
-                feature = (
-                    cq.Workplane("XY")
-                    .box(indicator_length, indicator_width, indicator_depth)
-                    .translate((indicator_length * 0.18, 0.0, top_z + indicator_depth * 0.5))
+                feature = _box(indicator_length, indicator_width, indicator_depth).translate(
+                    indicator_length * 0.18, 0.0, top_z + indicator_depth * 0.5
                 )
             elif indicator.style == "wedge":
                 profile = [
@@ -326,26 +399,19 @@ class KnobGeometry(MeshGeometry):
                     (indicator_width * 0.5, 0.0),
                     (0.0, indicator_length),
                 ]
-                feature = (
-                    cq.Workplane("XY")
-                    .polyline(profile)
-                    .close()
-                    .extrude(indicator_depth)
-                    .translate((0.0, 0.0, top_z))
-                )
+                feature = _polygon_extrude(profile, indicator_depth).translate(0.0, 0.0, top_z)
             else:
                 dot_radius = indicator_width * 0.5
-                feature = (
-                    cq.Workplane("XY")
-                    .circle(dot_radius)
-                    .extrude(indicator_depth)
-                    .translate((indicator_length * 0.22, 0.0, top_z))
+                feature = cylinder_z(dot_radius, indicator_depth).translate(
+                    indicator_length * 0.22, 0.0, top_z + indicator_depth * 0.5
                 )
-            feature = feature.rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), indicator.angle_deg)
+            feature = feature.rotate((0.0, 0.0, 1.0), radians(indicator.angle_deg))
             if indicator.mode == "raised" and indicator.style != "notch":
-                shape = shape.union(feature)
+                shape = boolean_union(shape, feature)
             else:
-                shape = shape.cut(feature.translate((0.0, 0.0, -indicator_depth * 0.5)))
+                shape = boolean_difference(
+                    shape, feature.translate(0.0, 0.0, -indicator_depth * 0.5)
+                )
 
         if top_feature.style != "none":
             feature_diameter = top_feature.diameter or diameter * 0.55
@@ -354,29 +420,23 @@ class KnobGeometry(MeshGeometry):
             if feature_radius <= 0.0:
                 raise ValueError("KnobTopFeature.diameter must be positive when provided")
             if top_feature.style == "flush_disk":
-                feature = (
-                    cq.Workplane("XY")
-                    .circle(feature_radius)
-                    .extrude(max(top_feature.height, height * 0.06))
-                    .translate((0.0, 0.0, top_z))
+                feat_h = max(top_feature.height, height * 0.06)
+                feature = cylinder_z(feature_radius, feat_h).translate(
+                    0.0, 0.0, top_z + feat_h * 0.5
                 )
-                shape = shape.union(feature)
+                shape = boolean_union(shape, feature)
             elif top_feature.style == "top_insert":
-                feature = (
-                    cq.Workplane("XY")
-                    .circle(feature_radius)
-                    .extrude(max(top_feature.height, height * 0.04))
-                    .translate((0.0, 0.0, top_z + height * 0.01))
+                feat_h = max(top_feature.height, height * 0.04)
+                feature = cylinder_z(feature_radius, feat_h).translate(
+                    0.0, 0.0, top_z + height * 0.01 + feat_h * 0.5
                 )
-                shape = shape.union(feature)
+                shape = boolean_union(shape, feature)
             else:
-                feature = (
-                    cq.Workplane("XY")
-                    .circle(feature_radius)
-                    .extrude(max(top_feature.depth, height * 0.08))
-                    .translate((0.0, 0.0, top_z - max(top_feature.depth, height * 0.08)))
+                feat_h = max(top_feature.depth, height * 0.08)
+                feature = cylinder_z(feature_radius, feat_h).translate(
+                    0.0, 0.0, top_z - feat_h * 0.5
                 )
-                shape = shape.cut(feature)
+                shape = boolean_difference(shape, feature)
 
         if bore.style != "none":
             bore_diameter = bore.diameter or diameter * 0.34
@@ -388,9 +448,19 @@ class KnobGeometry(MeshGeometry):
                 else max(height * 0.7, diameter * 0.22)
             )
             if bore.style == "round":
-                bore_cut = cq.Workplane("XY").circle(bore_diameter * 0.5).extrude(bore_depth)
+                bore_cut = cylinder_z(bore_diameter * 0.5, bore_depth).translate(
+                    0.0, 0.0, bore_depth * 0.5
+                )
             elif bore.style == "hex":
-                bore_cut = cq.Workplane("XY").polygon(6, bore_diameter).extrude(bore_depth)
+                # cq ``polygon(6, d)`` inscribes verts on a circle of diameter d (radius d/2).
+                hex_pts = [
+                    (
+                        0.5 * bore_diameter * cos(2.0 * pi * k / 6),
+                        0.5 * bore_diameter * sin(2.0 * pi * k / 6),
+                    )
+                    for k in range(6)
+                ]
+                bore_cut = _polygon_extrude(hex_pts, bore_depth)
             elif bore.style in {"d_shaft", "double_d"}:
                 flat_depth = (
                     float(bore.flat_depth) if bore.flat_depth is not None else bore_diameter * 0.16
@@ -407,7 +477,7 @@ class KnobGeometry(MeshGeometry):
                     profile_points = [
                         (max(min(point[0], flat_x), -flat_x), point[1]) for point in circle_points
                     ]
-                bore_cut = cq.Workplane("XY").polyline(profile_points).close().extrude(bore_depth)
+                bore_cut = _polygon_extrude(profile_points, bore_depth)
             else:
                 spline_count = bore.spline_count or 8
                 if spline_count < 3:
@@ -420,11 +490,11 @@ class KnobGeometry(MeshGeometry):
                     theta = pi * index / float(spline_count)
                     radius = outer_r if index % 2 == 0 else inner_r
                     points.append((radius * cos(theta), radius * sin(theta)))
-                bore_cut = cq.Workplane("XY").polyline(points).close().extrude(bore_depth)
+                bore_cut = _polygon_extrude(points, bore_depth)
             bore_cut = bore_cut.translate(
-                (0.0, 0.0, body_bottom - (skirt.height if skirt is not None else 0.0))
+                0.0, 0.0, body_bottom - (skirt.height if skirt is not None else 0.0)
             )
-            shape = shape.cut(bore_cut)
+            shape = boolean_difference(shape, bore_cut)
 
         for relief in body_reliefs:
             relief_depth = max(relief.depth, diameter * 0.04)
@@ -432,30 +502,25 @@ class KnobGeometry(MeshGeometry):
             relief_height = relief.height or height * 0.18
             if relief.style == "side_window":
                 cutter = (
-                    cq.Workplane("XY")
-                    .box(relief_depth * 2.2, relief_width, relief_height)
-                    .translate((max_radius - relief_depth * 0.55, 0.0, body_bottom + height * 0.55))
-                    .rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), relief.angle_deg)
+                    _box(relief_depth * 2.2, relief_width, relief_height)
+                    .translate(max_radius - relief_depth * 0.55, 0.0, body_bottom + height * 0.55)
+                    .rotate((0.0, 0.0, 1.0), radians(relief.angle_deg))
                 )
-                shape = shape.cut(cutter)
+                shape = boolean_difference(shape, cutter)
             elif relief.style == "top_recess":
-                cutter = (
-                    cq.Workplane("XY")
-                    .circle(relief_width * 0.5)
-                    .extrude(relief_depth)
-                    .translate((0.0, 0.0, body_bottom + height - relief_depth))
+                cutter = cylinder_z(relief_width * 0.5, relief_depth).translate(
+                    0.0, 0.0, body_bottom + height - relief_depth * 0.5
                 )
-                shape = shape.cut(cutter)
+                shape = boolean_difference(shape, cutter)
             else:
                 cutter = (
-                    cq.Workplane("XY")
-                    .box(relief_width, relief_width * 0.24, relief_depth)
-                    .translate((0.0, 0.0, body_bottom + height - relief_depth * 0.5))
-                    .rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), relief.angle_deg)
+                    _box(relief_width, relief_width * 0.24, relief_depth)
+                    .translate(0.0, 0.0, body_bottom + height - relief_depth * 0.5)
+                    .rotate((0.0, 0.0, 1.0), radians(relief.angle_deg))
                 )
-                shape = shape.cut(cutter)
+                shape = boolean_difference(shape, cutter)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         _adopt_mesh_geometry(self, geom)
@@ -510,7 +575,6 @@ class BezelGeometry(MeshGeometry):
         if recess is not None and (recess.depth <= 0.0 or recess.inset < 0.0):
             raise ValueError("BezelRecess depth must be positive and inset must be non-negative")
 
-        cq = require_cadquery(feature="BezelGeometry")
         outer_points = _shape_profile_points_2d(
             outer_shape,
             (outer_w, outer_h),
@@ -521,18 +585,10 @@ class BezelGeometry(MeshGeometry):
             (opening_w, opening_h),
             corner_radius=opening_corner_radius,
         )
-        shape = _cq_ring_solid(cq, outer_points, opening_points, depth, center=True)
+        shape: MeshGeometry = _ring_solid(outer_points, opening_points, depth, center=True)
 
-        if face.style in {"rounded", "radiused_step"} and face.fillet > 1e-6:
-            with suppress(Exception):
-                shape = shape.edges("|Z").fillet(
-                    min(face.fillet, depth * 0.25, min(outer_w, outer_h) * 0.1)
-                )
-        if face.style == "chamfered" and face.chamfer > 1e-6:
-            with suppress(Exception):
-                shape = shape.edges("|Z").chamfer(
-                    min(face.chamfer, depth * 0.25, min(outer_w, outer_h) * 0.1)
-                )
+        # cq ``edges("|Z").fillet/chamfer`` on the frame face is a cosmetic 3D edge round
+        # with no native equivalent -> SKIP (face.style rounded/chamfered/radiused_step).
 
         derived_wall = (
             (outer_w - opening_w) * 0.5,
@@ -565,10 +621,10 @@ class BezelGeometry(MeshGeometry):
                         lip_size[1] * 0.25,
                     ),
                 )
-                lip = _cq_ring_solid(
-                    cq, lip_outer, opening_points, lip_thickness, center=True
-                ).translate((0.0, 0.0, depth * 0.5))
-                shape = shape.union(lip)
+                lip = _ring_solid(lip_outer, opening_points, lip_thickness, center=True).translate(
+                    0.0, 0.0, depth * 0.5
+                )
+                shape = boolean_union(shape, lip)
 
         if recess is not None:
             requested_recess_size = (opening_w + recess.inset * 2.0, opening_h + recess.inset * 2.0)
@@ -595,38 +651,36 @@ class BezelGeometry(MeshGeometry):
                     recess_size[1] * 0.25,
                 ),
             )
-            recess_cut = _cq_ring_solid(
-                cq, recess_points, opening_points, recess.depth, center=True
-            ).translate((0.0, 0.0, depth * 0.5 - recess.depth * 0.5))
-            shape = shape.cut(recess_cut)
+            recess_cut = _ring_solid(
+                recess_points, opening_points, recess.depth, center=True
+            ).translate(0.0, 0.0, depth * 0.5 - recess.depth * 0.5)
+            shape = boolean_difference(shape, recess_cut)
 
         if visor.thickness > 1e-6 and (visor.top_extension > 1e-6 or visor.side_extension > 1e-6):
-            top_visor = (
-                cq.Workplane("XY")
-                .box(
-                    outer_w + visor.side_extension * 2.0,
-                    max(visor.top_extension, visor.thickness),
-                    visor.thickness,
-                )
-                .translate((0.0, outer_h * 0.5 + visor.top_extension * 0.5, depth * 0.5))
-            )
-            shape = shape.union(top_visor)
+            top_visor = _box(
+                outer_w + visor.side_extension * 2.0,
+                max(visor.top_extension, visor.thickness),
+                visor.thickness,
+            ).translate(0.0, outer_h * 0.5 + visor.top_extension * 0.5, depth * 0.5)
+            shape = boolean_union(shape, top_visor)
             if visor.side_extension > 1e-6:
                 cheek_y = max(visor.top_extension, outer_h * 0.5) * 0.5
-                cheek = cq.Workplane("XY").box(
+                cheek = _box(
                     visor.side_extension,
                     max(visor.top_extension, outer_h * 0.45),
                     visor.thickness,
                 )
-                shape = shape.union(
-                    cheek.translate(
-                        (outer_w * 0.5 + visor.side_extension * 0.5, cheek_y, depth * 0.5)
-                    )
+                shape = boolean_union(
+                    shape,
+                    cheek.copy().translate(
+                        outer_w * 0.5 + visor.side_extension * 0.5, cheek_y, depth * 0.5
+                    ),
                 )
-                shape = shape.union(
-                    cheek.translate(
-                        (-(outer_w * 0.5 + visor.side_extension * 0.5), cheek_y, depth * 0.5)
-                    )
+                shape = boolean_union(
+                    shape,
+                    cheek.copy().translate(
+                        -(outer_w * 0.5 + visor.side_extension * 0.5), cheek_y, depth * 0.5
+                    ),
                 )
 
         if flange.width > 1e-6 and flange.thickness > 1e-6:
@@ -635,10 +689,10 @@ class BezelGeometry(MeshGeometry):
                 (outer_w + flange.width * 2.0, outer_h + flange.width * 2.0),
                 corner_radius=outer_corner_radius + flange.width,
             )
-            flange_shape = _cq_ring_solid(
-                cq, flange_outer, outer_points, flange.thickness, center=True
-            ).translate((0.0, 0.0, -depth * 0.5 - flange.offset))
-            shape = shape.union(flange_shape)
+            flange_shape = _ring_solid(
+                flange_outer, outer_points, flange.thickness, center=True
+            ).translate(0.0, 0.0, -depth * 0.5 - flange.offset)
+            shape = boolean_union(shape, flange_shape)
 
         if mounts.style == "bosses" and mounts.hole_count > 0:
             boss_radius = (
@@ -661,19 +715,14 @@ class BezelGeometry(MeshGeometry):
                 (-margin_x, margin_y),
             ][: mounts.hole_count]
             for bx, by in boss_points:
-                boss = (
-                    cq.Workplane("XY")
-                    .circle(boss_radius)
-                    .extrude(boss_thickness)
-                    .translate((bx, by, -depth * 0.5 - boss_thickness))
+                boss = cylinder_z(boss_radius, boss_thickness).translate(
+                    bx, by, -depth * 0.5 - boss_thickness * 0.5
                 )
-                hole = (
-                    cq.Workplane("XY")
-                    .circle(hole_radius)
-                    .extrude(boss_thickness + depth + 0.01)
-                    .translate((bx, by, -depth * 0.5 - boss_thickness))
+                hole_len = boss_thickness + depth + 0.01
+                hole = cylinder_z(hole_radius, hole_len).translate(
+                    bx, by, -depth * 0.5 - boss_thickness + hole_len * 0.5
                 )
-                shape = shape.union(boss).cut(hole)
+                shape = boolean_difference(boolean_union(shape, boss), hole)
         elif mounts.style == "tabs" and mounts.hole_count > 0:
             tab_width = max(outer_w * 0.16, 0.008)
             tab_depth = max(depth * 0.14, 0.002)
@@ -686,20 +735,16 @@ class BezelGeometry(MeshGeometry):
                 mounts.hole_count, outer_w / max(mounts.hole_count, 1)
             )
             for px in tab_positions:
-                tab = (
-                    cq.Workplane("XY")
-                    .box(tab_width, tab_width * 0.6, tab_depth)
-                    .translate(
-                        (px, -(outer_h * 0.5 + tab_width * 0.3), -depth * 0.5 - tab_depth * 0.5)
-                    )
+                tab = _box(tab_width, tab_width * 0.6, tab_depth).translate(
+                    px, -(outer_h * 0.5 + tab_width * 0.3), -depth * 0.5 - tab_depth * 0.5
                 )
-                hole = (
-                    cq.Workplane("XY")
-                    .circle(hole_radius)
-                    .extrude(tab_depth + depth + 0.01)
-                    .translate((px, -(outer_h * 0.5 + tab_width * 0.3), -depth * 0.5 - tab_depth))
+                hole_len = tab_depth + depth + 0.01
+                hole = cylinder_z(hole_radius, hole_len).translate(
+                    px,
+                    -(outer_h * 0.5 + tab_width * 0.3),
+                    -depth * 0.5 - tab_depth + hole_len * 0.5,
                 )
-                shape = shape.union(tab).cut(hole)
+                shape = boolean_difference(boolean_union(shape, tab), hole)
         elif (
             mounts.style == "rear_flange"
             and mounts.hole_count > 0
@@ -711,10 +756,11 @@ class BezelGeometry(MeshGeometry):
                 (outer_w + flange_width * 2.0, outer_h + flange_width * 2.0),
                 corner_radius=outer_corner_radius + flange_width,
             )
-            rear_flange = _cq_ring_solid(
-                cq, rear_flange_outer, outer_points, max(depth * 0.12, 0.002), center=True
-            ).translate((0.0, 0.0, -depth * 0.5 - max(depth * 0.12, 0.002)))
-            shape = shape.union(rear_flange)
+            rear_thickness = max(depth * 0.12, 0.002)
+            rear_flange = _ring_solid(
+                rear_flange_outer, outer_points, rear_thickness, center=True
+            ).translate(0.0, 0.0, -depth * 0.5 - rear_thickness)
+            shape = boolean_union(shape, rear_flange)
 
         for cutout in cutouts:
             if cutout.width <= 0.0 or cutout.depth <= 0.0:
@@ -722,26 +768,22 @@ class BezelGeometry(MeshGeometry):
             cut_height = cutout.width
             cut_depth = cutout.depth
             if cutout.edge in {"top", "bottom"}:
-                cutter = cq.Workplane("XY").box(
-                    cutout.width, cut_depth, depth + visor.thickness + 0.02
-                )
+                cutter = _box(cutout.width, cut_depth, depth + visor.thickness + 0.02)
                 y = (
                     outer_h * 0.5 - cut_depth * 0.5
                     if cutout.edge == "top"
                     else -outer_h * 0.5 + cut_depth * 0.5
                 )
-                cutter = cutter.translate((cutout.offset, y, 0.0))
+                cutter = cutter.translate(cutout.offset, y, 0.0)
             else:
-                cutter = cq.Workplane("XY").box(
-                    cut_depth, cut_height, depth + visor.thickness + 0.02
-                )
+                cutter = _box(cut_depth, cut_height, depth + visor.thickness + 0.02)
                 x = (
                     outer_w * 0.5 - cut_depth * 0.5
                     if cutout.edge == "right"
                     else -outer_w * 0.5 + cut_depth * 0.5
                 )
-                cutter = cutter.translate((x, cutout.offset, 0.0))
-            shape = shape.cut(cutter)
+                cutter = cutter.translate(x, cutout.offset, 0.0)
+            shape = boolean_difference(shape, cutter)
 
         for feature in edge_features:
             if feature.size <= 0.0:
@@ -753,50 +795,47 @@ class BezelGeometry(MeshGeometry):
             )
             if feature.style == "notch":
                 if feature.edge in {"top", "bottom"}:
-                    cutter = cq.Workplane("XY").box(
-                        extent, feature.size, depth + visor.thickness + 0.02
-                    )
+                    cutter = _box(extent, feature.size, depth + visor.thickness + 0.02)
                     y = (
                         outer_h * 0.5 - feature.size * 0.5
                         if feature.edge == "top"
                         else -outer_h * 0.5 + feature.size * 0.5
                     )
-                    cutter = cutter.translate((feature.offset, y, 0.0))
+                    cutter = cutter.translate(feature.offset, y, 0.0)
                 else:
-                    cutter = cq.Workplane("XY").box(
-                        feature.size, extent, depth + visor.thickness + 0.02
-                    )
+                    cutter = _box(feature.size, extent, depth + visor.thickness + 0.02)
                     x = (
                         outer_w * 0.5 - feature.size * 0.5
                         if feature.edge == "right"
                         else -outer_w * 0.5 + feature.size * 0.5
                     )
-                    cutter = cutter.translate((x, feature.offset, 0.0))
-                shape = shape.cut(cutter)
+                    cutter = cutter.translate(x, feature.offset, 0.0)
+                shape = boolean_difference(shape, cutter)
                 continue
             if feature.edge in {"top", "bottom"}:
-                solid = cq.Workplane("XY").box(extent, feature.size, max(depth * 0.10, 0.0015))
+                solid = _box(extent, feature.size, max(depth * 0.10, 0.0015))
                 y = (
                     outer_h * 0.5 + feature.size * 0.5
                     if feature.edge == "top"
                     else -(outer_h * 0.5 + feature.size * 0.5)
                 )
-                solid = solid.translate((feature.offset, y, depth * 0.5))
+                solid = solid.translate(feature.offset, y, depth * 0.5)
             else:
-                solid = cq.Workplane("XY").box(feature.size, extent, max(depth * 0.10, 0.0015))
+                solid = _box(feature.size, extent, max(depth * 0.10, 0.0015))
                 x = (
                     outer_w * 0.5 + feature.size * 0.5
                     if feature.edge == "right"
                     else -(outer_w * 0.5 + feature.size * 0.5)
                 )
-                solid = solid.translate((x, feature.offset, depth * 0.5))
-            shape = (
-                shape.union(solid)
-                if feature.style == "bead"
-                else shape.cut(solid.translate((0.0, 0.0, -max(depth * 0.04, 0.0008))))
-            )
+                solid = solid.translate(x, feature.offset, depth * 0.5)
+            if feature.style == "bead":
+                shape = boolean_union(shape, solid)
+            else:
+                shape = boolean_difference(
+                    shape, solid.translate(0.0, 0.0, -max(depth * 0.04, 0.0008))
+                )
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_z0(geom)
         _adopt_mesh_geometry(self, geom)

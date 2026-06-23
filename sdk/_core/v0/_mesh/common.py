@@ -10,8 +10,6 @@ from typing import Iterable, List, Literal, Optional, Sequence, Tuple, Union
 import manifold3d as _m3d
 import numpy as np
 
-from sdk._dependencies import require_cadquery
-
 from ..assets import get_active_asset_session
 from ..types import Box, Cylinder, Mesh, Sphere
 

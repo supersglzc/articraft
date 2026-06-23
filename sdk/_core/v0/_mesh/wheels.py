@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-from math import cos, pi, sin
-from typing import Optional, Sequence
+from math import cos, pi, radians, sin
+from typing import List, Optional, Sequence, Tuple
 
-from sdk._dependencies import require_cadquery
-
-from .cadquery_helpers import (
-    _centered_pattern_positions,
-    _cq_annulus_x,
-    _cut_with_pattern,
-    _loft_between_radii_z,
-    _mesh_geometry_from_cadquery_model,
-    _rounded_slot_profile,
-)
+from .booleans import boolean_difference, boolean_union
 from .common import _clamp
-from .primitives import MeshGeometry, _adopt_mesh_geometry, _mesh_geometry_shifted_to_axis0
+from .native_build import annulus_x, cylinder_x, prism_yz
+from .primitives import (
+    BoxGeometry,
+    ExtrudeGeometry,
+    LatheGeometry,
+    LoftGeometry,
+    MeshGeometry,
+    _adopt_mesh_geometry,
+    _mesh_geometry_shifted_to_axis0,
+)
+from .shape_helpers import _centered_pattern_positions, _rounded_slot_profile
 from .specs import (
     BoltPattern,
     TireCarcass,
@@ -29,6 +30,30 @@ from .specs import (
     WheelRim,
     WheelSpokes,
 )
+
+
+def _box_solid(sx: float, sy: float, sz: float) -> MeshGeometry:
+    """Outward-wound rectangular prism (BoxGeometry is inward-wound; bad as a boolean tool)."""
+    hx, hy = sx * 0.5, sy * 0.5
+    return ExtrudeGeometry([(-hx, -hy), (hx, -hy), (hx, hy), (-hx, hy)], sz)
+
+
+def _revolve_x(profile_axial_radial: List[Tuple[float, float]], segments: int = 96) -> MeshGeometry:
+    """Revolve a ``(axial, radial)`` profile 360 deg about local X (cq revolve about (1,0,0)).
+
+    LatheGeometry revolves a ``(radius, height)`` profile about Z, so we feed
+    ``(radial, axial)`` and rotate the result onto X.
+    """
+    lathe = LatheGeometry([(r, a) for (a, r) in profile_axial_radial], segments=segments)
+    return lathe.rotate_y(pi / 2.0)
+
+
+def _circle_pts_x(x: float, radius: float, segments: int = 48) -> list[tuple[float, float, float]]:
+    """A circle of given radius in the plane X=x (for LoftGeometry sections along X)."""
+    return [
+        (x, radius * cos(2.0 * pi * k / segments), radius * sin(2.0 * pi * k / segments))
+        for k in range(segments)
+    ]
 
 
 class WheelGeometry(MeshGeometry):
@@ -70,47 +95,40 @@ class WheelGeometry(MeshGeometry):
         if bore.diameter <= 0.0 or bore.diameter >= hub.radius * 2.0:
             raise ValueError("WheelBore.diameter must fit inside the hub")
 
-        cq = require_cadquery(feature="WheelGeometry")
-        shape = _cq_annulus_x(cq, rim_outer, rim_inner, width)
+        shape: MeshGeometry = annulus_x(rim_inner, rim_outer, width)
         if rim.flange_height > 1e-6 and rim.flange_thickness > 1e-6:
             flange_inner = max(rim_outer - rim.flange_height, rim_inner + 1.0e-4)
-            lip = _cq_annulus_x(cq, rim_outer, flange_inner, rim.flange_thickness)
-            shape = shape.union(lip.translate((width * 0.5 - rim.flange_thickness * 0.5, 0.0, 0.0)))
-            shape = shape.union(
-                lip.translate((-(width * 0.5 - rim.flange_thickness * 0.5), 0.0, 0.0))
-            )
+            lip_dx = width * 0.5 - rim.flange_thickness * 0.5
+            for sign in (1.0, -1.0):
+                lip = annulus_x(flange_inner, rim_outer, rim.flange_thickness, sign * lip_dx)
+                shape = boolean_union(shape, lip)
         if rim.bead_seat_depth > 1e-6:
-            seat = _cq_annulus_x(
-                cq,
-                rim_outer,
+            seat = annulus_x(
                 max(rim_outer - rim.bead_seat_depth, rim_inner + 1.0e-4),
+                rim_outer,
                 max(width * 0.22, 0.004),
             )
-            shape = shape.cut(seat)
+            shape = boolean_difference(shape, seat)
 
-        hub_cyl = cq.Workplane("YZ").circle(hub.radius).extrude(hub.width * 0.5, both=True)
-        shape = shape.union(hub_cyl)
+        shape = boolean_union(shape, cylinder_x(hub.radius, hub.width))
         if hub.cap_style == "domed":
-            front_cap = (
-                _loft_between_radii_z(
-                    cq,
-                    [
-                        (hub.radius, 0.0),
-                        (hub.radius * 0.82, hub.width * 0.12),
-                        (hub.radius * 0.30, hub.width * 0.28),
-                    ],
-                )
-                .rotate((0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 90.0)
-                .translate((hub.width * 0.5, 0.0, 0.0))
-            )
-            shape = shape.union(front_cap)
+            levels = [
+                (hub.radius, 0.0),
+                (hub.radius * 0.82, hub.width * 0.12),
+                (hub.radius * 0.30, hub.width * 0.28),
+            ]
+            base_x = hub.width * 0.5
+            profiles = [_circle_pts_x(base_x + z, r) for r, z in levels]
+            shape = boolean_union(shape, LoftGeometry(profiles))
         elif hub.cap_style == "protruding":
-            cap = cq.Workplane("YZ").circle(hub.radius * 0.82).extrude(max(width * 0.12, 0.003))
-            shape = shape.union(cap.translate((hub.width * 0.5, 0.0, 0.0)))
+            cap_len = max(width * 0.12, 0.003)
+            shape = boolean_union(
+                shape, cylinder_x(hub.radius * 0.82, cap_len, hub.width * 0.5 + cap_len * 0.5)
+            )
         elif hub.cap_style == "recessed":
-            pocket = cq.Workplane("YZ").circle(hub.radius * 0.55).extrude(max(width * 0.10, 0.002))
-            shape = shape.cut(
-                pocket.translate((hub.width * 0.5 - max(width * 0.10, 0.002), 0.0, 0.0))
+            poc_len = max(width * 0.10, 0.002)
+            shape = boolean_difference(
+                shape, cylinder_x(hub.radius * 0.55, poc_len, hub.width * 0.5 - poc_len * 0.5)
             )
 
         disc_thickness = max(spokes.thickness, width * 0.08, 0.002)
@@ -124,13 +142,19 @@ class WheelGeometry(MeshGeometry):
         )
         rear_inset = _clamp(face.rear_inset, 0.0, width * 0.5 - disc_thickness * 0.5)
         disc_inner_radius = max(hub.radius * 0.78, hub.radius - max(disc_thickness * 0.35, 0.0012))
-        front_disc = _cq_annulus_x(
-            cq, face_outer_radius, disc_inner_radius, disc_thickness
-        ).translate((width * 0.5 - front_inset - disc_thickness * 0.5, 0.0, 0.0))
-        rear_disc = _cq_annulus_x(
-            cq, face_outer_radius, disc_inner_radius, disc_thickness
-        ).translate((-(width * 0.5 - rear_inset - disc_thickness * 0.5), 0.0, 0.0))
-        shape = shape.union(front_disc).union(rear_disc)
+        front_disc = annulus_x(
+            disc_inner_radius,
+            face_outer_radius,
+            disc_thickness,
+            width * 0.5 - front_inset - disc_thickness * 0.5,
+        )
+        rear_disc = annulus_x(
+            disc_inner_radius,
+            face_outer_radius,
+            disc_thickness,
+            -(width * 0.5 - rear_inset - disc_thickness * 0.5),
+        )
+        shape = boolean_union(boolean_union(shape, front_disc), rear_disc)
 
         spoke_style = spokes.style
         if spoke_style not in {"none", "disc"}:
@@ -151,14 +175,8 @@ class WheelGeometry(MeshGeometry):
                 angle_deg: float, center_radius: float, length: float, width_local: float
             ):
                 profile = _rounded_slot_profile(length, width_local)
-                slot = (
-                    cq.Workplane("YZ")
-                    .polyline([(point[1], point[0] + center_radius) for point in profile])
-                    .close()
-                    .extrude(cut_width * 0.5, both=True)
-                    .rotate((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), angle_deg)
-                )
-                return slot
+                pts = [(point[1], point[0] + center_radius) for point in profile]
+                return prism_yz(pts, cut_width).rotate((1.0, 0.0, 0.0), radians(angle_deg))
 
             if spoke_style in {"straight", "solid_slots"}:
                 for index in range(spoke_count):
@@ -206,7 +224,8 @@ class WheelGeometry(MeshGeometry):
                                 window_width * 0.72,
                             )
                         )
-            shape = _cut_with_pattern(shape, cutters)
+            for cutter in cutters:
+                shape = boolean_difference(shape, cutter)
 
         if hub.bolt_pattern is not None:
             pattern = hub.bolt_pattern
@@ -219,46 +238,41 @@ class WheelGeometry(MeshGeometry):
                 raise ValueError("BoltPattern holes must fit inside the hub")
             for index in range(pattern.count):
                 angle = 2.0 * pi * index / float(pattern.count)
-                hole = (
-                    cq.Workplane("YZ")
-                    .circle(pattern.hole_diameter * 0.5)
-                    .extrude(width + 0.04, both=True)
-                    .translate((0.0, bolt_r * cos(angle), bolt_r * sin(angle)))
+                hole = cylinder_x(pattern.hole_diameter * 0.5, width + 0.04).translate(
+                    0.0, bolt_r * cos(angle), bolt_r * sin(angle)
                 )
-                shape = shape.cut(hole)
+                shape = boolean_difference(shape, hole)
 
         if bore.style == "round":
-            bore_cut = (
-                cq.Workplane("YZ").circle(bore.diameter * 0.5).extrude(width + 0.04, both=True)
-            )
+            bore_cut = cylinder_x(bore.diameter * 0.5, width + 0.04)
         elif bore.style == "hex":
-            bore_cut = cq.Workplane("YZ").polygon(6, bore.diameter).extrude(width + 0.04, both=True)
+            br = bore.diameter * 0.5
+            hex_pts = [(br * cos(radians(60 * k)), br * sin(radians(60 * k))) for k in range(6)]
+            bore_cut = prism_yz(hex_pts, width + 0.04)
         else:
             key_width = bore.key_width or bore.diameter * 0.32
-            bore_cut = (
-                cq.Workplane("YZ").circle(bore.diameter * 0.5).extrude(width + 0.04, both=True)
+            bore_cut = cylinder_x(bore.diameter * 0.5, width + 0.04)
+            key = BoxGeometry((bore.diameter * 0.5, width + 0.04, key_width)).translate(
+                0.0, bore.diameter * 0.25, 0.0
             )
-            key = cq.Workplane("YZ").box(width + 0.04, key_width, bore.diameter * 0.5)
-            bore_cut = bore_cut.union(key.translate((0.0, bore.diameter * 0.25, 0.0)))
-        shape = shape.cut(bore_cut)
+            bore_cut = boolean_union(bore_cut, key)
+        shape = boolean_difference(shape, bore_cut)
 
         if flange is not None:
             if flange.radius <= 0.0 or flange.thickness <= 0.0:
                 raise ValueError("WheelFlange radius and thickness must be positive")
             ring_inner = max(flange.radius - flange.thickness, hub.radius * 1.05)
-            ring = _cq_annulus_x(cq, flange.radius, ring_inner, flange.thickness * 0.6)
+            ring = annulus_x(ring_inner, flange.radius, flange.thickness * 0.6)
             bridge_len = max(flange.offset + flange.thickness * 0.6, flange.thickness * 0.8)
             bridge_radial = max(flange.radius - rim_outer + flange.thickness * 0.35, 0.006)
             bridge_thickness = max(flange.thickness * 0.55, 0.0015)
-            strut = cq.Workplane("XY").box(bridge_len, bridge_radial, bridge_thickness)
             x_offsets: list[float] = []
             if flange.side in {"front", "both"}:
                 x_offsets.append(width * 0.5 + flange.offset)
             if flange.side in {"rear", "both"}:
                 x_offsets.append(-(width * 0.5 + flange.offset))
             for x_offset in x_offsets:
-                ring_shape = ring.translate((x_offset, 0.0, 0.0))
-                shape = shape.union(ring_shape)
+                shape = boolean_union(shape, ring.translate(x_offset, 0.0, 0.0))
                 axial_mid = (
                     (width * 0.5 + x_offset) * 0.5
                     if x_offset >= 0.0
@@ -266,13 +280,12 @@ class WheelGeometry(MeshGeometry):
                 )
                 radial_mid = (rim_outer + ring_inner) * 0.5
                 for angle_deg in (0.0, 90.0, 180.0, 270.0):
-                    shape = shape.union(
-                        strut.translate((axial_mid, radial_mid, 0.0)).rotate(
-                            (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), angle_deg
-                        )
+                    strut = BoxGeometry((bridge_len, bridge_radial, bridge_thickness)).translate(
+                        axial_mid, radial_mid, 0.0
                     )
+                    shape = boolean_union(shape, strut.rotate((1.0, 0.0, 0.0), radians(angle_deg)))
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_axis0(geom, 0)
         _adopt_mesh_geometry(self, geom)
@@ -315,7 +328,6 @@ class TireGeometry(MeshGeometry):
             if groove.width < 0.0 or groove.depth < 0.0:
                 raise ValueError("TireGroove width/depth must be non-negative")
 
-        cq = require_cadquery(feature="TireGeometry")
         half_w = width * 0.5
         belt_half = half_w * _clamp(carcass.belt_width_ratio, 0.12, 0.96)
         shoulder_w = shoulder.width if shoulder.width > 1e-6 else width * 0.11
@@ -360,30 +372,20 @@ class TireGeometry(MeshGeometry):
             (-half_w * 0.55, inner_crown),
             (-half_w, inner_radius),
         ]
-        shape = (
-            cq.Workplane("XY")
-            .polyline(profile)
-            .close()
-            .revolve(360.0, (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
-        )
+        shape = _revolve_x(profile)
 
         for groove in grooves:
             if groove.width <= 1e-6 or groove.depth <= 1e-6:
                 continue
-            cutter = (
-                cq.Workplane("XY")
-                .moveTo(groove.center_offset - groove.width * 0.5, outer_radius - groove.depth)
-                .lineTo(groove.center_offset + groove.width * 0.5, outer_radius - groove.depth)
-                .lineTo(
-                    groove.center_offset + groove.width * 0.5, outer_radius + groove.depth * 1.6
-                )
-                .lineTo(
-                    groove.center_offset - groove.width * 0.5, outer_radius + groove.depth * 1.6
-                )
-                .close()
-                .revolve(360.0, (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+            cutter = _revolve_x(
+                [
+                    (groove.center_offset - groove.width * 0.5, outer_radius - groove.depth),
+                    (groove.center_offset + groove.width * 0.5, outer_radius - groove.depth),
+                    (groove.center_offset + groove.width * 0.5, outer_radius + groove.depth * 1.6),
+                    (groove.center_offset - groove.width * 0.5, outer_radius + groove.depth * 1.6),
+                ]
             )
-            shape = shape.cut(cutter)
+            shape = boolean_difference(shape, cutter)
 
         tread_style = tread.style
         tread_depth = tread.depth
@@ -393,32 +395,30 @@ class TireGeometry(MeshGeometry):
                 groove_count, max(tread.pitch or (width * 0.20), width * 0.14)
             )
             for pos in band_positions:
-                cutter = (
-                    cq.Workplane("XY")
-                    .moveTo(pos - width * 0.03, outer_radius - tread_depth)
-                    .lineTo(pos + width * 0.03, outer_radius - tread_depth)
-                    .lineTo(pos + width * 0.03, outer_radius + tread_depth * 1.4)
-                    .lineTo(pos - width * 0.03, outer_radius + tread_depth * 1.4)
-                    .close()
-                    .revolve(360.0, (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+                cutter = _revolve_x(
+                    [
+                        (pos - width * 0.03, outer_radius - tread_depth),
+                        (pos + width * 0.03, outer_radius - tread_depth),
+                        (pos + width * 0.03, outer_radius + tread_depth * 1.4),
+                        (pos - width * 0.03, outer_radius + tread_depth * 1.4),
+                    ]
                 )
-                shape = shape.cut(cutter)
+                shape = boolean_difference(shape, cutter)
         elif tread_style == "rib" and tread_depth > 1e-6:
             rib_count = tread.count or 3
             rib_positions = _centered_pattern_positions(
                 rib_count, max(tread.pitch or (width * 0.20), width * 0.14)
             )
             for pos in rib_positions:
-                rib = (
-                    cq.Workplane("XY")
-                    .moveTo(pos - width * 0.04, outer_radius)
-                    .lineTo(pos + width * 0.04, outer_radius)
-                    .lineTo(pos + width * 0.04, outer_radius + tread_depth)
-                    .lineTo(pos - width * 0.04, outer_radius + tread_depth)
-                    .close()
-                    .revolve(360.0, (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+                rib = _revolve_x(
+                    [
+                        (pos - width * 0.04, outer_radius),
+                        (pos + width * 0.04, outer_radius),
+                        (pos + width * 0.04, outer_radius + tread_depth),
+                        (pos - width * 0.04, outer_radius + tread_depth),
+                    ]
                 )
-                shape = shape.union(rib)
+                shape = boolean_union(shape, rib)
         elif tread_style in {"block", "lug", "chevron"} and tread_depth > 1e-6:
             circ_count = tread.count or (
                 12
@@ -450,40 +450,35 @@ class TireGeometry(MeshGeometry):
                     )
                     if tread_style == "chevron":
                         for sign in (-1.0, 1.0):
-                            lug = (
-                                cq.Workplane("XY")
-                                .box(axial_width, tread_depth * 1.35, tangential * 0.48)
-                                .translate(
-                                    (
-                                        row_x + sign * axial_width * 0.38,
-                                        outer_radius + tread_depth * 0.16,
-                                        0.0,
-                                    )
-                                )
-                                .rotate(
-                                    (0.0, 0.0, 0.0),
-                                    (0.0, 1.0, 0.0),
-                                    tread.angle_deg * sign
-                                    if abs(tread.angle_deg) > 1e-6
-                                    else 24.0 * sign,
-                                )
-                                .rotate((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), angle_deg)
+                            tilt = (
+                                tread.angle_deg * sign
+                                if abs(tread.angle_deg) > 1e-6
+                                else 24.0 * sign
                             )
-                            shape = shape.union(lug)
+                            lug = (
+                                _box_solid(axial_width, tread_depth * 1.35, tangential * 0.48)
+                                .translate(
+                                    row_x + sign * axial_width * 0.38,
+                                    outer_radius + tread_depth * 0.16,
+                                    0.0,
+                                )
+                                .rotate((0.0, 1.0, 0.0), radians(tilt))
+                                .rotate((1.0, 0.0, 0.0), radians(angle_deg))
+                            )
+                            shape = boolean_union(shape, lug)
                     else:
                         lug = (
-                            cq.Workplane("XY")
-                            .box(
+                            _box_solid(
                                 axial_width,
                                 tread_depth * 1.35,
                                 tangential * (0.55 if tread_style == "lug" else 0.42),
                             )
-                            .translate((row_x, outer_radius + tread_depth * 0.16, 0.0))
-                            .rotate((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), angle_deg)
+                            .translate(row_x, outer_radius + tread_depth * 0.16, 0.0)
+                            .rotate((1.0, 0.0, 0.0), radians(angle_deg))
                         )
-                        shape = shape.union(lug)
+                        shape = boolean_union(shape, lug)
 
-        geom = _mesh_geometry_from_cadquery_model(shape)
+        geom = shape
         if not center:
             geom = _mesh_geometry_shifted_to_axis0(geom, 0)
         _adopt_mesh_geometry(self, geom)

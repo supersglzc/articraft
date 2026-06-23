@@ -126,9 +126,9 @@ def test_add_tool_call_shows_all_find_examples_titles() -> None:
         success=True,
         duration=0.02,
         result=[
-            {"title": "Raspberry Pi 3 Model B Assembly", "path": "sdk/_examples/cadquery/foo.md"},
-            {"title": "Parametric Pin Header", "path": "sdk/_examples/cadquery/bar.md"},
-            {"title": "RJ45 Surface-mount Jack", "path": "sdk/_examples/cadquery/baz.md"},
+            {"title": "Raspberry Pi 3 Model B Assembly", "path": "sdk/_examples/base/foo.md"},
+            {"title": "Parametric Pin Header", "path": "sdk/_examples/base/bar.md"},
+            {"title": "RJ45 Surface-mount Jack", "path": "sdk/_examples/base/baz.md"},
         ],
     )
 
@@ -152,7 +152,7 @@ def test_add_tool_call_marks_weakly_relevant_find_example_titles() -> None:
         result=[
             {
                 "title": "PiTray Clip",
-                "path": "sdk/_examples/cadquery/pitray_clip.md",
+                "path": "sdk/_examples/base/pitray_clip.md",
                 "match_quality": "weakly_relevant",
             }
         ],

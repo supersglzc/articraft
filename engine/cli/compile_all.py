@@ -60,7 +60,7 @@ _OPEN_FILE_WORKER_RESERVE = 64
 _OPEN_FILE_WORKER_FD_BUDGET = 8
 _COMPILE_TARGETS = {"full", "visual"}
 _BASE_BULK_PRELOAD_MODULES = ("engine.agent.compiler", "engine.viewer.api.store")
-_CADQUERY_BULK_PRELOAD_MODULES = ("cadquery", "OCP", "sdk")
+_GEOMETRY_BULK_PRELOAD_MODULES = ("sdk", "manifold3d")
 _EXCEPTION_PREFIX_RE = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):\s*")
 _GEOMETRY_QC_MARKERS = (
     "isolated parts detected",
@@ -96,7 +96,6 @@ _COMPILE_SCHEDULER_CLASS_PRIORITY = (
     "LoftGeometry",
     "SweepGeometry",
     "ExtrudeGeometry",
-    "CadQuery",
 )
 
 
@@ -271,8 +270,6 @@ def _infer_compile_scheduler_class(script_path: Path) -> str:
         return "unknown"
 
     geometry_classes = set(_GEOMETRY_CLASS_CALL_RE.findall(source))
-    if "mesh_from_cadquery(" in source or "import cadquery" in source:
-        geometry_classes.add("CadQuery")
 
     for class_name in _COMPILE_SCHEDULER_CLASS_PRIORITY:
         if class_name in geometry_classes:
@@ -906,7 +903,7 @@ def _effective_mem_per_worker_gb(*, target: str, requested_mem_per_worker_gb: fl
 def _bulk_compile_preload_modules(candidates: list[CompileCandidate]) -> tuple[str, ...]:
     modules = list(_BASE_BULK_PRELOAD_MODULES)
     if candidates:
-        modules.extend(_CADQUERY_BULK_PRELOAD_MODULES)
+        modules.extend(_GEOMETRY_BULK_PRELOAD_MODULES)
 
     deduped: list[str] = []
     seen: set[str] = set()

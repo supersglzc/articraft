@@ -294,7 +294,7 @@ class GuidanceInjector:
                             "not freely rotating."
                         ),
                         (
-                            "- If CadQuery reports no suitable edges for chamfer/fillet, remove "
+                            "- If mesh geometry reports no suitable edges for chamfer/fillet, remove "
                             "or reduce that fillet/chamfer before changing the overall shape."
                         ),
                         "</codex_cli_api_error_guidance>",

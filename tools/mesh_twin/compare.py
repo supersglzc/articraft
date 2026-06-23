@@ -1,6 +1,6 @@
 """Mesh twin-verification harness.
 
-Compares a baseline mesh (CadQuery-backed) against a candidate mesh (mesh-native)
+Compares a baseline mesh against a candidate mesh (mesh-native)
 and reports geometric-similarity metrics plus a side-by-side render so a human can
 visually confirm the rewrite produces a faithful twin.
 
@@ -99,7 +99,7 @@ def render_side_by_side(
 
     fig = plt.figure(figsize=(15, 5))
     panels = [
-        ("CadQuery (baseline)", baseline, "#4C72B0"),
+        ("baseline", baseline, "#4C72B0"),
         ("trimesh+manifold3d (new)", candidate, "#C44E52"),
         ("overlay", None, None),
     ]

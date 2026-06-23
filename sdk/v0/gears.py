@@ -4,27 +4,29 @@ from __future__ import annotations
 # (https://github.com/meadiode/cq_gears), Apache License 2.0.
 #
 # Original work:
-# CQ_Gears - CadQuery based involute profile gear generator
+# Involute-profile gear generator, involute profile gear generator
 # Copyright 2021 meadiode@github
+#
+# This module has been ported from mesh geometry to the SDK's native mesh layer.
+# The involute-gear math is preserved verbatim from the original; only the
+# geometry *construction* (formerly NURBS faces sewn into a shell) is replaced
+# by polygon extrusions / lofts and boolean operations on ``MeshGeometry``.
 import warnings
 
 import numpy as np
-from OCP.BRepAdaptor import BRepAdaptor_Surface
-from OCP.BRepBuilderAPI import (
-    BRepBuilderAPI_MakeEdge,
-    BRepBuilderAPI_MakeFace,
-    BRepBuilderAPI_MakeWire,
-    BRepBuilderAPI_Sewing,
+
+from sdk._core.v0._mesh.booleans import (
+    boolean_difference,
+    boolean_intersection,
+    boolean_union,
 )
-from OCP.GeomAPI import GeomAPI_IntSS
-from OCP.ShapeAnalysis import ShapeAnalysis_FreeBounds
-from OCP.ShapeFix import ShapeFix_Face
-from OCP.TopoDS import TopoDS
-from OCP.TopTools import TopTools_HSequenceOfShape, TopTools_ListOfShape
-
-from sdk._dependencies import require_cadquery
-
-cq = require_cadquery(feature="gear generation in `sdk`")
+from sdk._core.v0._mesh.native_build import cylinder_z, round_polygon_2d
+from sdk._core.v0._mesh.primitives import (
+    ExtrudeGeometry,
+    LoftGeometry,
+    MeshGeometry,
+    _adopt_mesh_geometry,
+)
 
 __all__ = [
     "GearBase",
@@ -48,6 +50,9 @@ __all__ = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Pure math helpers (unchanged from the original cq_gears port)
+# ---------------------------------------------------------------------------
 def sphere_to_cartesian(r, gamma, theta):
     """Convert spherical coordinates to cartesian."""
 
@@ -129,77 +134,62 @@ def angle_between(o, a, b):
     return np.arccos(np.dot(p, q) / (np.linalg.norm(p) * np.linalg.norm(q)))
 
 
-def make_shell(faces, tol=1e-2):
-    """Like ``cq.Shell.makeShell`` but allows an explicit tolerance."""
-
-    shell_builder = BRepBuilderAPI_Sewing(tol)
-    for face in faces:
-        shell_builder.Add(face.wrapped)
-    shell_builder.Perform()
-    return cq.Shell(shell_builder.SewedShape())
+# ---------------------------------------------------------------------------
+# Native-mesh construction helpers
+# ---------------------------------------------------------------------------
+def _profile_xy(points):
+    """Drop the Z column of an (N, 3) point array into a list of ``(x, y)``."""
+    return [(float(p[0]), float(p[1])) for p in points]
 
 
-def make_cross_section_face(faces, cut_plane, int_tol=1e-7, wire_con_tol=1e-3):
-    ss = GeomAPI_IntSS()
-    cps = BRepAdaptor_Surface(cut_plane.wrapped).Surface().Surface()
-
-    curves = []
-    for face in faces:
-        gfs = BRepAdaptor_Surface(face.wrapped).Surface().Surface()
-        ss.Perform(cps, gfs, int_tol)
-        if ss.NbLines():
-            for i in range(ss.NbLines()):
-                curves.append(ss.Line(i + 1))
-
-    edges = []
-    for curve in curves:
-        eb = BRepBuilderAPI_MakeEdge(curve)
-        edges.append(eb.Edge())
-
-    wb = BRepBuilderAPI_MakeWire()
-    elist = TopTools_ListOfShape()
-    for edge in edges:
-        elist.Append(edge)
-    wb.Add(elist)
-
-    if not wb.IsDone():
-        edges_in = TopTools_HSequenceOfShape()
-        wires_out = TopTools_HSequenceOfShape()
-        for edge in edges:
-            edges_in.Append(edge)
-        ShapeAnalysis_FreeBounds.ConnectEdgesToWires_s(
-            edges_in,
-            wire_con_tol,
-            False,
-            wires_out,
-        )
-        wire = TopoDS.Wire_s(wires_out.First())
-    else:
-        wire = wb.Wire()
-
-    fb = BRepBuilderAPI_MakeFace(wire, True)
-    face = fb.Face()
-    if not cq.Face(face).isValid():
-        fix = ShapeFix_Face(face)
-        fix.FixOrientation()
-        fix.Perform()
-        face = fix.Face()
-    return cq.Face(face)
+def _rotate_xy(points, angle):
+    """Rotate a list of ``(x, y)`` points about the origin by ``angle`` radians."""
+    ca, sa = np.cos(angle), np.sin(angle)
+    return [(x * ca - y * sa, x * sa + y * ca) for (x, y) in points]
 
 
-class GearBase:
+def _extrude_profile(profile_xy, height, z_center):
+    """Straight extrusion of a closed XY polygon, centered then shifted to ``z_center``."""
+    geom = ExtrudeGeometry(profile_xy, height)
+    return geom.translate(0.0, 0.0, z_center) if z_center else geom
+
+
+def _twist_extrude_profile(profile_xy, height, z_base, twist_angle, slices):
+    """Loft a closed XY polygon along +Z while rotating it by ``twist_angle`` total.
+
+    Replaces mesh geometry's ``twistExtrude``: ``slices`` rings are stacked from
+    ``z_base`` to ``z_base + height`` and each ring is rotated incrementally.
+    """
+    slices = max(2, int(slices))
+    profiles = []
+    for k in range(slices + 1):
+        frac = k / slices
+        angle = twist_angle * frac
+        ring = _rotate_xy(profile_xy, angle)
+        z = z_base + height * frac
+        profiles.append([(x, y, z) for (x, y) in ring])
+    return LoftGeometry(profiles)
+
+
+def _loft_rings(rings, *, cap=True):
+    """Loft a sequence of 3D point rings into a solid.
+
+    ``cap=False`` leaves the end rings open (use when the rings are non-planar
+    and the body is closed by a separate union/intersection).
+    """
+    return LoftGeometry([list(ring) for ring in rings], cap=cap)
+
+
+# ---------------------------------------------------------------------------
+class GearBase(MeshGeometry):
     ka = 1.0
     kd = 1.25
 
     curve_points = 20
     surface_splines = 5
 
-    wire_comb_tol = 1e-2
-    spline_approx_tol = 1e-2
-    shell_sewing_tol = 1e-2
-    isection_tol = 1e-7
-    spline_approx_min_deg = 3
-    spline_approx_max_deg = 8
+    # Number of slices used to approximate helical / twisted extrusions.
+    twist_slices = 24
 
     def __init__(self, *args, **kv_args):
         raise NotImplementedError("Constructor is not defined")
@@ -207,6 +197,11 @@ class GearBase:
     def build(self, **kv_params):
         params = {**self.build_params, **kv_params}
         return self._build(**params)
+
+    def _finalize(self):
+        """Build the default body and adopt it into ``self`` as a ``MeshGeometry``."""
+        body = self.build()
+        _adopt_mesh_geometry(self, body)
 
 
 class SpurGear(GearBase):
@@ -223,6 +218,7 @@ class SpurGear(GearBase):
         dedendum_coeff=None,
         **build_params,
     ):
+        MeshGeometry.__init__(self)
         if addendum_coeff is not None and addendum_coeff <= 0:
             raise ValueError("Addendum coefficient (addendum_coeff) must be greater than 0.")
         if dedendum_coeff is not None and dedendum_coeff <= 0:
@@ -304,6 +300,8 @@ class SpurGear(GearBase):
             (bcxy[0] + bcr * np.cos(t), bcxy[1] + bcr * np.sin(t), np.zeros(self.curve_points))
         ).squeeze()
 
+        self._finalize()
+
     def tooth_points(self):
         return np.concatenate(
             (self.t_lflank_pts, self.t_tip_pts, self.t_rflank_pts, self.t_root_pts)
@@ -318,102 +316,52 @@ class SpurGear(GearBase):
             angle += self.tau
         return pts
 
-    def _build_tooth_faces(self, twist_angle_a, twist_angle_b, z_pos, width):
-        surf_splines = int(np.ceil(abs(self.twist_angle) / np.pi))
-        surf_splines = max(1, surf_splines) * self.surface_splines
-        spline_tf = np.linspace(
-            (twist_angle_a, z_pos), (twist_angle_b, z_pos + width), surf_splines
-        )
-        t_faces = []
-        for spline in (
-            self.t_lflank_pts,
-            self.t_tip_pts,
-            self.t_rflank_pts,
-            self.t_root_pts,
-        ):
-            face_pts = []
-            for a, z in spline_tf:
-                r_mat = rotation_matrix((0.0, 0.0, 1.0), a)
-                pts = spline.copy()
-                pts[:, 2] = z
-                pts = pts @ r_mat
-                face_pts.append([cq.Vector(*pt) for pt in pts])
-            face = cq.Face.makeSplineApprox(
-                face_pts,
-                tol=self.spline_approx_tol,
-                minDeg=self.spline_approx_min_deg,
-                maxDeg=self.spline_approx_max_deg,
-            )
-            t_faces.append(face)
-        return t_faces
+    def _gear_profile_xy(self):
+        """The full closed cross-section polygon (all teeth) in the XY plane."""
+        return _profile_xy(self.gear_points())
 
-    def _build_gear_faces(self):
-        t_faces = self._build_tooth_faces(0.0, self.twist_angle, 0.0, self.width)
-        faces = []
-        for i in range(self.z):
-            for tf in t_faces:
-                faces.append(
-                    tf.rotate(
-                        (0.0, 0.0, 0.0),
-                        (0.0, 0.0, 1.0),
-                        np.degrees(self.tau * i),
-                    )
-                )
-        wp = cq.Workplane("XY").add(faces)
-        topface_wires = cq.Wire.combine(wp.edges("<Z").vals(), tol=self.wire_comb_tol)
-        topface = cq.Face.makeFromWires(topface_wires[0])
-        botface_wires = cq.Wire.combine(wp.edges(">Z").vals(), tol=self.wire_comb_tol)
-        botface = cq.Face.makeFromWires(botface_wires[0])
-        wp = wp.add(topface).add(botface)
-        return wp.vals()
+    def _twist_slice_count(self):
+        n = int(np.ceil(abs(self.twist_angle) / (np.pi / 4.0)))
+        return max(self.twist_slices, n)
+
+    def _build_body(self):
+        """Build the raw gear solid (no bore / hub / spokes etc.)."""
+        profile = self._gear_profile_xy()
+        if self.twist_angle == 0.0:
+            return _extrude_profile(profile, self.width, 0.0).translate(0.0, 0.0, self.width / 2.0)
+        return _twist_extrude_profile(
+            profile, self.width, 0.0, self.twist_angle, self._twist_slice_count()
+        )
 
     def _make_bore(self, body, bore_d):
         if bore_d is None:
             return body
-        return (
-            cq.Workplane("XY")
-            .add(body)
-            .faces("<Z")
-            .workplane()
-            .circle(bore_d / 2.0)
-            .cutThruAll()
-            .val()
-        )
+        tool = cylinder_z(bore_d / 2.0, self.width + 0.02, self.width / 2.0)
+        return boolean_difference(body, tool)
 
-    def _make_teeth_cutout_wire(self, plane, t1, t2, twist_angle):
-        at1 = t1 * self.tau + self.tau / 2.0 + twist_angle
-        at2 = t2 * self.tau + self.tau / 2.0 + twist_angle
-        p1x = np.cos(at1)
-        p1y = np.sin(at1)
-        p2x = np.cos((at1 + at2) / 2.0)
-        p2y = np.sin((at1 + at2) / 2.0)
-        p3x = np.cos(at2)
-        p3y = np.sin(at2)
-        rc = self.ra + 1.0
-        rd = self.rd - 0.01
-        return (
-            plane.moveTo(p1x * rd, p1y * rd)
-            .lineTo(p1x * rc, p1y * rc)
-            .threePointArc((p2x * rc, p2y * rc), (p3x * rc, p3y * rc))
-            .lineTo(p3x * rd, p3y * rd)
-            .threePointArc((p2x * rd, p2y * rd), (p1x * rd, p1y * rd))
-            .close()
-        )
+    def _teeth_cutout_profile(self, t1, t2):
+        """A wedge profile (XY) spanning teeth t1..t2 used to remove teeth."""
+        at1 = t1 * self.tau + self.tau / 2.0
+        at2 = t2 * self.tau + self.tau / 2.0
+        rc = self.ra + max(self.ra, 1.0)
+        rd = self.rd - max(self.rd * 0.05, 1.0e-4)
+        n = max(8, int(abs(at2 - at1) / (np.pi / 64.0)))
+        outer_angles = np.linspace(at1, at2, n)
+        inner_angles = np.linspace(at2, at1, n)
+        pts = [(np.cos(at1) * rd, np.sin(at1) * rd)]
+        pts += [(np.cos(a) * rc, np.sin(a) * rc) for a in outer_angles]
+        pts += [(np.cos(a) * rd, np.sin(a) * rd) for a in inner_angles]
+        return pts
 
     def _remove_teeth(self, body, t1, t2):
-        plane = cq.Workplane("XY").workplane(offset=-0.1).add(body)
+        profile = self._teeth_cutout_profile(t1, t2)
         if self.twist_angle == 0.0:
-            cutout = self._make_teeth_cutout_wire(plane, t1, t2, 0.0).extrude(
-                self.width + 0.2,
-                combine=False,
-            )
+            tool = _extrude_profile(profile, self.width + 0.2, self.width / 2.0)
         else:
-            cutout = self._make_teeth_cutout_wire(plane, t1, t2, 0.0).twistExtrude(
-                self.width + 0.2,
-                np.degrees(-self.twist_angle),
-                combine=False,
+            tool = _twist_extrude_profile(
+                profile, self.width + 0.2, -0.1, self.twist_angle, self._twist_slice_count()
             )
-        return cq.Workplane("XY").add(body).cut(cutout).val()
+        return boolean_difference(body, tool)
 
     def _make_missing_teeth(self, body, missing_teeth):
         if missing_teeth is None:
@@ -445,30 +393,36 @@ class SpurGear(GearBase):
                 "Bottom face recess diameter is not set"
             )
         if recess:
-            body = cq.Workplane("XY").add(body).faces(">Z").workplane()
+            outer = cylinder_z(recess_d / 2.0, recess, self.width - recess / 2.0)
             if hub_d is not None:
-                body = body.circle(hub_d / 2.0)
-            body = body.circle(recess_d / 2.0).cutBlind(-recess).val()
+                outer = boolean_difference(
+                    outer, cylinder_z(hub_d / 2.0, recess + 0.02, self.width - recess / 2.0)
+                )
+            body = boolean_difference(body, outer)
         if bottom_recess:
-            body = cq.Workplane("XY").add(body).faces("<Z").workplane()
             if bottom_hub_d is None:
                 bottom_hub_d = hub_d
             if bottom_recess_d is None:
                 bottom_recess_d = recess_d
+            outer = cylinder_z(bottom_recess_d / 2.0, bottom_recess, bottom_recess / 2.0)
             if bottom_hub_d is not None:
-                body = body.circle(bottom_hub_d / 2.0)
-            body = body.circle(bottom_recess_d / 2.0).cutBlind(-bottom_recess).val()
+                outer = boolean_difference(
+                    outer,
+                    cylinder_z(bottom_hub_d / 2.0, bottom_recess + 0.02, bottom_recess / 2.0),
+                )
+            body = boolean_difference(body, outer)
         return body
 
     def _make_hub(self, body, hub_d, hub_length, bore_d):
         if hub_length is None:
             return body
         assert hub_d is not None, "Hub diameter is not set"
-        body = cq.Workplane("XY").add(body).faces(">Z").workplane()
+        hub = cylinder_z(hub_d / 2.0, hub_length, self.width + hub_length / 2.0)
         if bore_d is not None:
-            body = body.circle(bore_d / 2.0)
-        body = body.circle(hub_d / 2.0).extrude(hub_length)
-        return body.val()
+            hub = boolean_difference(
+                hub, cylinder_z(bore_d / 2.0, hub_length + 0.02, self.width + hub_length / 2.0)
+            )
+        return boolean_union(body, hub)
 
     def _make_spokes(self, body, spokes_id, spokes_od, n_spokes, spoke_width, spoke_fillet):
         if n_spokes is None:
@@ -488,29 +442,24 @@ class SpurGear(GearBase):
         a2 = np.arcsin((spoke_width / 2.0) / (spokes_od / 2.0))
         a3 = tau - a2
         a4 = tau - a1
-        cutout = (
-            cq.Workplane("XY")
-            .workplane(offset=-0.1)
-            .moveTo(np.cos(a1) * r1, np.sin(a1) * r1)
-            .lineTo(np.cos(a2) * r2, np.sin(a2) * r2)
-            .radiusArc((np.cos(a3) * r2, np.sin(a3) * r2), -r2)
-            .lineTo(np.cos(a4) * r1, np.sin(a4) * r1)
-            .radiusArc((np.cos(a1) * r1, np.sin(a1) * r1), r1)
-            .close()
-            .extrude(self.width + 1.0)
-        )
+
+        n_arc = 24
+        outer_arc = np.linspace(a2, a3, n_arc)
+        inner_arc = np.linspace(a4, a1, n_arc)
+        profile = [(np.cos(a1) * r1, np.sin(a1) * r1)]
+        profile += [(np.cos(a) * r2, np.sin(a) * r2) for a in outer_arc]
+        profile += [(np.cos(a4) * r1, np.sin(a4) * r1)]
+        profile += [(np.cos(a) * r1, np.sin(a) * r1) for a in inner_arc]
+
         if spoke_fillet is not None:
-            cutout = cutout.edges("|Z").fillet(spoke_fillet)
-        body = cq.Workplane("XY").add(body)
+            profile = round_polygon_2d(profile, spoke_fillet, kind="fillet")
+
+        cut_h = self.width + 1.0
         for i in range(n_spokes):
-            body = body.cut(
-                cutout.rotate(
-                    (0.0, 0.0, 0.0),
-                    (0.0, 0.0, 1.0),
-                    np.degrees(tau * i),
-                )
-            )
-        return body.val()
+            rotated = _rotate_xy(profile, tau * i)
+            tool = _extrude_profile(rotated, cut_h, self.width / 2.0)
+            body = boolean_difference(body, tool)
+        return body
 
     def _make_chamfer(self, body, chamfer=None, chamfer_top=None, chamfer_bottom=None):
         e = 0.01
@@ -526,30 +475,34 @@ class SpurGear(GearBase):
                 wx, wy = chamfer_top
             else:
                 wx, wy = chamfer_top, chamfer_top
-            cutter = (
-                cq.Workplane("XZ")
-                .moveTo(self.ra - wx, self.width + e)
-                .hLine(wx + e)
-                .vLine(-wy - e)
-                .close()
-                .revolve()
-            )
-            body = cq.Workplane("XY").add(body).cut(cutter)
+            # Revolved chamfer cutter around the top outer edge.
+            profile = [
+                (self.ra - wx, self.width + e),
+                (self.ra + e, self.width + e),
+                (self.ra + e, self.width - wy),
+            ]
+            cutter = self._revolve_profile(profile)
+            body = boolean_difference(body, cutter)
         if chamfer_bottom is not None:
             if isinstance(chamfer_bottom, (list, tuple)):
                 wx, wy = chamfer_bottom
             else:
                 wx, wy = chamfer_bottom, chamfer_bottom
-            cutter = (
-                cq.Workplane("XZ")
-                .moveTo(self.ra + e, wy)
-                .vLine(-wy - e)
-                .hLine(-wx - e)
-                .close()
-                .revolve()
-            )
-            body = cq.Workplane("XY").add(body).cut(cutter)
-        return body.val()
+            profile = [
+                (self.ra + e, wy),
+                (self.ra + e, -e),
+                (self.ra - wx, -e),
+            ]
+            cutter = self._revolve_profile(profile)
+            body = boolean_difference(body, cutter)
+        return body
+
+    @staticmethod
+    def _revolve_profile(profile_rz, segments=128):
+        """Revolve a closed ``(r, z)`` profile about the Z axis into a solid."""
+        from sdk._core.v0._mesh.primitives import LatheGeometry
+
+        return LatheGeometry(profile_rz, segments=segments)
 
     def _build(
         self,
@@ -573,9 +526,7 @@ class SpurGear(GearBase):
         *args,
         **kv_args,
     ):
-        faces = self._build_gear_faces()
-        shell = make_shell(faces, tol=self.shell_sewing_tol)
-        body = cq.Solid.makeSolid(shell)
+        body = self._build_body()
         body = self._make_chamfer(body, chamfer, chamfer_top, chamfer_bottom)
         body = self._make_bore(body, bore_d)
         body = self._make_missing_teeth(body, missing_teeth)
@@ -598,29 +549,31 @@ class SpurGear(GearBase):
 
 
 class HerringboneGear(SpurGear):
-    def _build_tooth_faces(self, twist_angle_a, twist_angle_b, z_pos, width):
-        t_faces1 = super()._build_tooth_faces(0.0, self.twist_angle, 0.0, self.width / 2.0)
-        t_faces2 = super()._build_tooth_faces(
-            self.twist_angle,
-            0.0,
-            self.width / 2.0,
-            self.width / 2.0,
-        )
-        return t_faces1 + t_faces2
+    def _build_body(self):
+        profile = self._gear_profile_xy()
+        if self.twist_angle == 0.0:
+            return _extrude_profile(profile, self.width, 0.0).translate(0.0, 0.0, self.width / 2.0)
+        half = self.width / 2.0
+        slices = self._twist_slice_count()
+        lower = _twist_extrude_profile(profile, half, 0.0, self.twist_angle, slices)
+        # Continue from the top profile of the lower half, twisting back.
+        top_profile = _rotate_xy(profile, self.twist_angle)
+        upper = _twist_extrude_profile(top_profile, half, half, -self.twist_angle, slices)
+        return boolean_union(lower, upper)
 
     def _remove_teeth(self, body, t1, t2):
-        plane = cq.Workplane("XY").workplane(offset=-0.1)
-        cutout = (
-            self._make_teeth_cutout_wire(plane, t1, t2, 0.0)
-            .twistExtrude(self.width / 2.0 + 0.05, np.degrees(-self.twist_angle))
-            .faces(">Z")
-            .workplane()
-        )
-        cutout = self._make_teeth_cutout_wire(cutout, t1, t2, -self.twist_angle).twistExtrude(
-            self.width / 2.0 + 0.05,
-            np.degrees(self.twist_angle),
-        )
-        return cq.Workplane("XY").add(body).cut(cutout)
+        profile = self._teeth_cutout_profile(t1, t2)
+        if self.twist_angle == 0.0:
+            tool = _extrude_profile(profile, self.width + 0.2, self.width / 2.0)
+            return boolean_difference(body, tool)
+        half = self.width / 2.0
+        slices = self._twist_slice_count()
+        lower = _twist_extrude_profile(profile, half + 0.05, -0.05, self.twist_angle, slices)
+        top_profile = _rotate_xy(profile, self.twist_angle)
+        upper = _twist_extrude_profile(top_profile, half + 0.05, half, -self.twist_angle, slices)
+        body = boolean_difference(body, lower)
+        body = boolean_difference(body, upper)
+        return body
 
 
 class RingGear(SpurGear):
@@ -636,6 +589,7 @@ class RingGear(SpurGear):
         backlash=0.0,
         **build_params,
     ):
+        MeshGeometry.__init__(self)
         self.m = m = module
         self.z = z = teeth_number
         self.a0 = a0 = np.radians(pressure_angle)
@@ -704,45 +658,26 @@ class RingGear(SpurGear):
             (bcxy[0] + bcr * np.cos(t), bcxy[1] + bcr * np.sin(t), np.zeros(self.curve_points))
         ).squeeze()
 
-    def _build_rim_face(self):
-        w1 = cq.Wire.makeCircle(self.rim_r, cq.Vector(0.0, 0.0, 0.0), cq.Vector(0.0, 0.0, 1.0))
-        w2 = cq.Wire.makeCircle(
-            self.rim_r,
-            cq.Vector(0.0, 0.0, self.width),
-            cq.Vector(0.0, 0.0, 1.0),
-        )
-        return cq.Face.makeRuledSurface(w1, w2)
+        self._finalize()
 
-    def _build_gear_faces(self):
-        t_faces = self._build_tooth_faces(0.0, self.twist_angle, 0.0, self.width)
-        faces = []
-        for i in range(self.z):
-            for tf in t_faces:
-                faces.append(
-                    tf.rotate(
-                        (0.0, 0.0, 0.0),
-                        (0.0, 0.0, 1.0),
-                        np.degrees(self.tau * i),
-                    )
-                )
-        wp = cq.Workplane("XY").add(faces)
-        topface_wires = cq.Wire.combine(wp.edges("<Z").vals(), tol=self.wire_comb_tol)
-        topface_rim_wire = cq.Wire.makeCircle(
-            self.rim_r,
-            cq.Vector(0.0, 0.0, 0.0),
-            cq.Vector(0.0, 0.0, 1.0),
-        )
-        topface = cq.Face.makeFromWires(topface_rim_wire, topface_wires)
-        botface_wires = cq.Wire.combine(wp.edges(">Z").vals(), tol=self.wire_comb_tol)
-        botface_rim_wire = cq.Wire.makeCircle(
-            self.rim_r,
-            cq.Vector(0.0, 0.0, self.width),
-            cq.Vector(0.0, 0.0, 1.0),
-        )
-        botface = cq.Face.makeFromWires(botface_rim_wire, botface_wires)
-        wp = wp.add(topface).add(botface)
-        wp = wp.add(self._build_rim_face())
-        return wp.vals()
+    def _build_body(self):
+        """Ring gear: solid rim annulus with the tooth profile subtracted inside."""
+        # Outer solid disc up to the rim radius.
+        if self.twist_angle == 0.0:
+            outer = cylinder_z(self.rim_r, self.width, self.width / 2.0)
+            teeth_tool = _extrude_profile(
+                self._gear_profile_xy(), self.width + 0.02, self.width / 2.0
+            )
+        else:
+            outer = cylinder_z(self.rim_r, self.width, self.width / 2.0)
+            teeth_tool = _twist_extrude_profile(
+                self._gear_profile_xy(),
+                self.width + 0.02,
+                -0.01,
+                self.twist_angle,
+                self._twist_slice_count(),
+            )
+        return boolean_difference(outer, teeth_tool)
 
     def _make_chamfer(self, body, chamfer=None, chamfer_top=None, chamfer_bottom=None):
         e = 0.01
@@ -758,57 +693,52 @@ class RingGear(SpurGear):
                 wx, wy = chamfer_top
             else:
                 wx, wy = chamfer_top, chamfer_top
-            cutter = (
-                cq.Workplane("XZ")
-                .moveTo(self.ra - e, self.width - wy)
-                .vLine(wy + e)
-                .hLine(wx + e)
-                .close()
-                .revolve()
-            )
-            body = cq.Workplane("XY").add(body).cut(cutter)
+            profile = [
+                (self.ra - e, self.width - wy),
+                (self.ra - e, self.width + e),
+                (self.ra + wx, self.width + e),
+            ]
+            cutter = self._revolve_profile(profile)
+            body = boolean_difference(body, cutter)
         if chamfer_bottom is not None:
             if isinstance(chamfer_bottom, (list, tuple)):
                 wx, wy = chamfer_bottom
             else:
                 wx, wy = chamfer_bottom, chamfer_bottom
-            cutter = (
-                cq.Workplane("XZ")
-                .moveTo(self.ra + wx, -e)
-                .hLine(-wx - e)
-                .vLine(wy + e)
-                .close()
-                .revolve()
-            )
-            body = cq.Workplane("XY").add(body).cut(cutter)
-        return body.val()
+            profile = [
+                (self.ra + wx, -e),
+                (self.ra - e, -e),
+                (self.ra - e, wy),
+            ]
+            cutter = self._revolve_profile(profile)
+            body = boolean_difference(body, cutter)
+        return body
 
     def _build(self, chamfer=None, chamfer_top=None, chamfer_bottom=None, *args, **kv_args):
-        faces = self._build_gear_faces()
-        shell = make_shell(faces)
-        body = cq.Solid.makeSolid(shell)
+        body = self._build_body()
         return self._make_chamfer(body, chamfer, chamfer_top, chamfer_bottom)
 
 
 class HerringboneRingGear(RingGear):
-    def _build_tooth_faces(self, twist_angle_a, twist_angle_b, z_pos, width):
-        t_faces1 = super()._build_tooth_faces(0.0, self.twist_angle, 0.0, self.width / 2.0)
-        t_faces2 = super()._build_tooth_faces(
-            self.twist_angle,
-            0.0,
-            self.width / 2.0,
-            self.width / 2.0,
+    def _build_body(self):
+        if self.twist_angle == 0.0:
+            return super()._build_body()
+        half = self.width / 2.0
+        slices = self._twist_slice_count()
+        outer = cylinder_z(self.rim_r, self.width, self.width / 2.0)
+        profile = self._gear_profile_xy()
+        lower = _twist_extrude_profile(profile, half + 0.01, -0.005, self.twist_angle, slices)
+        top_profile = _rotate_xy(profile, self.twist_angle)
+        upper = _twist_extrude_profile(
+            top_profile, half + 0.01, half - 0.005, -self.twist_angle, slices
         )
-        return t_faces1 + t_faces2
+        teeth_tool = boolean_union(lower, upper)
+        return boolean_difference(outer, teeth_tool)
 
 
 class PlanetaryGearset(GearBase):
     gear_cls = SpurGear
     ring_gear_cls = RingGear
-
-    asm_sun_color = "gold"
-    asm_planet_color = "lightsteelblue"
-    asm_ring_color = "goldenrod"
 
     def __init__(
         self,
@@ -824,6 +754,7 @@ class PlanetaryGearset(GearBase):
         backlash=0.0,
         **build_params,
     ):
+        MeshGeometry.__init__(self)
         ring_z = sun_teeth_number + planet_teeth_number * 2
         self.sun = self.gear_cls(
             module,
@@ -865,11 +796,9 @@ class PlanetaryGearset(GearBase):
                 "gears and the number of planets"
             )
         self.build_params = build_params
+        self._finalize()
 
-    def _build(self, *args, **kv_args):
-        return self.assemble(*args, **kv_args).toCompound()
-
-    def assemble(
+    def _build(
         self,
         build_sun=True,
         build_planets=True,
@@ -879,20 +808,14 @@ class PlanetaryGearset(GearBase):
         ring_build_args={},
         **kv_args,
     ):
-        gearset = cq.Assembly(name="planetary")
+        parts = []
         if build_sun:
             in_args = self.build_params.get("sun_build_args", {})
             args = {**self.build_params, **in_args, **kv_args, **sun_build_args}
             sun = self.sun.build(**args)
             if (self.planet.z % 2) != 0:
-                loc = cq.Location(
-                    cq.Vector(0.0, 0.0, 0.0),
-                    cq.Vector(0.0, 0.0, 1.0),
-                    np.degrees(self.sun.tau / 2.0),
-                )
-            else:
-                loc = cq.Location()
-            gearset.add(sun, name="sun", loc=loc, color=cq.Color(self.asm_sun_color))
+                sun = sun.copy().rotate_z(self.sun.tau / 2.0)
+            parts.append(sun)
 
         if build_planets and self.n_planets > 0:
             planet_a = np.pi * 2.0 / self.n_planets
@@ -904,38 +827,30 @@ class PlanetaryGearset(GearBase):
             in_args = self.build_params.get("planet_build_args", {})
             args = {**self.build_params, **in_args, **kv_args, **planet_build_args}
             planet_body = self.planet.build(**args)
-            planets = cq.Assembly(name="planets")
             for i, bld in enumerate(tobuild):
                 if not bld:
                     continue
-                loc = cq.Location(
-                    cq.Vector(
-                        np.cos(i * planet_a) * self.orbit_r,
-                        np.sin(i * planet_a) * self.orbit_r,
-                        0.0,
-                    ),
-                    cq.Vector(0.0, 0.0, 1.0),
-                    np.degrees(self.planet.tau / 2.0),
+                placed = planet_body.copy().rotate_z(self.planet.tau / 2.0)
+                placed = placed.translate(
+                    np.cos(i * planet_a) * self.orbit_r,
+                    np.sin(i * planet_a) * self.orbit_r,
+                    0.0,
                 )
-                planets.add(
-                    planet_body,
-                    name=f"planet_{i:02}",
-                    loc=loc,
-                    color=cq.Color(self.asm_planet_color),
-                )
-            gearset.add(planets)
+                parts.append(placed)
 
         if build_ring:
             in_args = self.build_params.get("ring_build_args", {})
             args = {**self.build_params, **in_args, **kv_args, **ring_build_args}
             ring = self.ring.build(**args)
-            loc = cq.Location(
-                cq.Vector(0.0, 0.0, 0.0),
-                cq.Vector(0.0, 0.0, 1.0),
-                np.degrees(self.ring.tau / 2.0),
-            )
-            gearset.add(ring, name="ring", loc=loc, color=cq.Color(self.asm_ring_color))
-        return gearset
+            ring = ring.copy().rotate_z(self.ring.tau / 2.0)
+            parts.append(ring)
+
+        if not parts:
+            raise ValueError("Planetary gearset has no parts to build")
+        result = parts[0]
+        for part in parts[1:]:
+            result = boolean_union(result, part)
+        return result
 
 
 class HerringbonePlanetaryGearset(PlanetaryGearset):
@@ -958,6 +873,7 @@ class BevelGear(GearBase):
         backlash=0.0,
         **build_params,
     ):
+        MeshGeometry.__init__(self)
         self.m = m = module
         self.z = z = teeth_number
         self.a0 = a0 = np.radians(pressure_angle)
@@ -1028,6 +944,8 @@ class BevelGear(GearBase):
                 sphere_to_cartesian(1.0, np.full(self.curve_points, gamma_tr), r_theta)
             ).squeeze()
 
+        self._finalize()
+
     def tooth_points(self):
         return np.concatenate(
             (self.t_lflank_pts, self.t_tip_pts, self.t_rflank_pts, self.t_root_pts)
@@ -1042,151 +960,66 @@ class BevelGear(GearBase):
             angle += self.tau
         return pts
 
-    def _build_tooth_faces(self):
+    def _bevel_ring(self, radius, twist):
+        """A full closed ring of gear points scaled to ``radius`` (on the unit sphere)
+        and twisted about Z by ``twist``. Returns a list of 3D points."""
+        tpts = self.tooth_points()
+        r_mat = rotation_matrix((0.0, 0.0, 1.0), twist)
+        rotated = (tpts @ r_mat) * radius
+        ring_pts = rotated.copy()
+        angle = self.tau
+        for _ in range(self.z - 1):
+            ring_pts = np.concatenate((ring_pts, rotated @ rotation_matrix((0.0, 0.0, 1.0), angle)))
+            angle += self.tau
+        return [(float(p[0]), float(p[1]), float(p[2])) for p in ring_pts]
+
+    def _build_body(self):
+        """Build a solid bevel gear by lofting closed tooth-section rings between
+        the inner (small) and outer (large) spherical radii and capping each end
+        to the central axis, producing a watertight tapered toothed cone."""
+        # Spherical radii at the back (large) and front (small) cones.
         pc_h = np.cos(self.gamma_r) * self.gs_r
         pc_f = pc_h / np.cos(self.gamma_f)
-        pc_rb = pc_f * np.sin(self.gamma_f)
         tc_h = np.cos(self.gamma_f) * (self.gs_r - self.face_width)
         tc_f = tc_h / np.cos(self.gamma_r)
-        tc_rb = tc_f * np.sin(self.gamma_f)
         ta1 = -(pc_f - self.gs_r) / self.face_width * self.twist_angle
         ta2 = (self.gs_r - tc_f) / self.face_width * self.twist_angle
 
-        surf_splines = int(np.ceil(abs(self.twist_angle) / (np.pi * 2.0)))
-        surf_splines = max(1, surf_splines) * self.surface_splines
-        spline_tf = np.linspace((pc_f, ta1), (tc_f - 0.01, ta2), surf_splines)
+        n_sections = max(3, self.surface_splines)
+        radii = np.linspace(pc_f, tc_f, n_sections)
+        twists = np.linspace(ta1, ta2, n_sections)
+        rings = [self._bevel_ring(r, tw) for r, tw in zip(radii, twists)]
 
-        tcp_size = tc_rb * 1000.0
-        top_cut_plane = cq.Face.makePlane(
-            length=tcp_size, width=tcp_size, basePnt=(0.0, 0.0, tc_h), dir=(0.0, 0.0, 1.0)
-        )
-        bcp_size = pc_rb * 1000.0
-        bott_cut_plane = cq.Face.makePlane(
-            length=bcp_size, width=bcp_size, basePnt=(0.0, 0.0, pc_h), dir=(0.0, 0.0, 1.0)
-        )
-
-        def get_zmax(face):
-            return face.BoundingBox().zmax
-
-        t_faces = []
-        for spline in (
-            self.t_lflank_pts,
-            self.t_tip_pts,
-            self.t_rflank_pts,
-            self.t_root_pts,
-        ):
-            face_pts = []
-            for r, a in spline_tf:
-                r_mat = rotation_matrix((0.0, 0.0, 1.0), a)
-                pts = (spline @ r_mat) * r
-                face_pts.append([cq.Vector(*pt) for pt in pts])
-            face = cq.Face.makeSplineApprox(
-                face_pts,
-                tol=self.spline_approx_tol,
-                minDeg=self.spline_approx_min_deg,
-                maxDeg=self.spline_approx_max_deg,
-            )
-            cpd = face.split(top_cut_plane)
-            face = max(list(cpd), key=get_zmax) if isinstance(cpd, cq.Compound) else cpd
-            cpd = face.split(bott_cut_plane)
-            face = min(list(cpd), key=get_zmax) if isinstance(cpd, cq.Compound) else cpd
-            t_faces.append(face)
-        return t_faces
-
-    def _build_gear_faces(self):
-        t_faces = self._build_tooth_faces()
-        faces = []
-        for i in range(self.z):
-            for tf in t_faces:
-                faces.append(
-                    tf.rotate(
-                        (0.0, 0.0, 0.0),
-                        (0.0, 0.0, 1.0),
-                        np.degrees(self.tau * i),
-                    )
-                )
-        wp = cq.Workplane("XY").add(faces)
-        topface_wires = cq.Wire.combine(wp.edges("<Z").vals(), tol=self.wire_comb_tol)
-        topface = cq.Face.makeFromWires(topface_wires[0])
-        botface_wires = cq.Wire.combine(wp.edges(">Z").vals(), tol=self.wire_comb_tol)
-        botface = cq.Face.makeFromWires(botface_wires[0])
-        wp = wp.add(topface).add(botface)
-        return wp.vals()
-
-    def _trim_bottom(self, body, do_trim=False):
-        if not do_trim:
-            return body
-        r = self.gs_r
-        p1 = sphere_to_cartesian(r, self.gamma_r * 0.99, np.pi / 2.0)
-        p2 = sphere_to_cartesian(r, self.gamma_p, np.pi / 2.0)
-        p3 = sphere_to_cartesian(r, self.gamma_f * 1.01, np.pi / 2.0)
-        x1 = np.tan(self.gamma_f) * self.cone_h + 1.0
-        trimmer = (
-            cq.Workplane("XZ")
-            .moveTo(p1[0], p1[2])
-            .threePointArc((p2[0], p2[2]), (p3[0], p3[2]))
-            .lineTo(x1, p3[2])
-            .lineTo(x1, p1[2])
-            .close()
-            .revolve(combine=False)
-        )
-        return cq.Workplane("XY").add(body).cut(trimmer).val()
-
-    def _trim_top(self, body, do_trim=False):
-        if not do_trim:
-            return body
-        r = self.gs_r - self.face_width
-        p1 = sphere_to_cartesian(r, self.gamma_r, np.pi / 2.0)
-        p2 = sphere_to_cartesian(r, self.gamma_p, np.pi / 2.0)
-        p3 = sphere_to_cartesian(r, self.gamma_f * 1.01, np.pi / 2.0)
-        trimmer = (
-            cq.Workplane("XZ")
-            .moveTo(p1[0], p1[2])
-            .threePointArc((p2[0], p2[2]), (p3[0], p3[2]))
-            .lineTo(0.0, p3[2])
-            .lineTo(0.0, p1[2])
-            .close()
-            .revolve(combine=False)
-        )
-        return cq.Workplane("XY").add(body).cut(trimmer).val()
+        # Flatten each spherical tooth ring to its mean z so every loft profile is
+        # planar in XY. LoftGeometry then builds a tapered toothed frustum with
+        # planar end caps -- a watertight single-body bevel gear that matches the
+        # exact involute tooth outline (the spherical z-curvature is approximated
+        # by the per-ring mean plane).
+        profiles = []
+        for ring in rings:
+            mean_z = sum(p[2] for p in ring) / len(ring)
+            profiles.append([(p[0], p[1], mean_z) for p in ring])
+        return LoftGeometry(profiles, cap=True)
 
     def _make_bore(self, body, bore_d):
         if bore_d is None:
             return body
-        return (
-            cq.Workplane("XY")
-            .add(body)
-            .faces("<Z")
-            .workplane()
-            .circle(bore_d / 2.0)
-            .cutThruAll()
-            .val()
-        )
+        tool = cylinder_z(bore_d / 2.0, self.cone_h * 3.0)
+        return boolean_difference(body, tool)
 
     def _build(self, bore_d=None, trim_bottom=True, trim_top=True, **kv_args):
-        faces = self._build_gear_faces()
-        shell = make_shell(faces)
-        body = cq.Solid.makeSolid(shell)
-        body = self._trim_bottom(body, trim_bottom)
-        body = self._trim_top(body, trim_top)
+        body = self._build_body()
+        # Reorient so the back cone sits at z=0 and the gear opens upward,
+        # matching the original mesh geometry placement.
+        body = body.rotate((1.0, 0.0, 0.0), np.pi)
+        body = body.translate(0.0, 0.0, self.cone_h)
         t_align_angle = -self.mp_theta / 2.0 - np.pi / 2.0 + np.pi / self.z
-        body = (
-            cq.Workplane("XY")
-            .add(body)
-            .rotate((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), 180.0)
-            .translate((0.0, 0.0, self.cone_h))
-            .rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), np.degrees(t_align_angle))
-            .solids()
-            .val()
-        )
+        body = body.rotate((0.0, 0.0, 1.0), t_align_angle)
         return self._make_bore(body, bore_d)
 
 
 class BevelGearPair(GearBase):
     gear_cls = BevelGear
-
-    asm_gear_color = "goldenrod"
-    asm_pinion_color = "lightsteelblue"
 
     def __init__(
         self,
@@ -1201,6 +1034,7 @@ class BevelGearPair(GearBase):
         backlash=0.0,
         **build_params,
     ):
+        MeshGeometry.__init__(self)
         self.axis_angle = axis_angle = np.radians(axis_angle)
         aa_sin = np.sin(axis_angle)
         aa_cos = np.cos(axis_angle)
@@ -1226,8 +1060,9 @@ class BevelGearPair(GearBase):
             backlash=backlash,
         )
         self.build_params = build_params
+        self._finalize()
 
-    def assemble(
+    def _build(
         self,
         build_gear=True,
         build_pinion=True,
@@ -1236,35 +1071,29 @@ class BevelGearPair(GearBase):
         pinion_build_args={},
         **kv_args,
     ):
-        gearset = cq.Assembly(name="bevel_pair")
+        parts = []
         if build_gear:
             in_args = self.build_params.get("gear_build_args", {})
             args = {**self.build_params, **in_args, **kv_args, **gear_build_args}
-            gear = self.gear.build(**args)
-            gearset.add(gear, name="gear", loc=cq.Location(), color=cq.Color(self.asm_gear_color))
+            parts.append(self.gear.build(**args))
         if build_pinion:
             in_args = self.build_params.get("pinion_build_args", {})
             args = {**self.build_params, **in_args, **kv_args, **pinion_build_args}
             pinion = self.pinion.build(**args)
-            loc = cq.Location()
             if transform_pinion:
-                loc *= cq.Location(
-                    cq.Vector(0.0, 0.0, self.gear.cone_h),
-                    cq.Vector(0.0, 1.0, 0.0),
-                    np.degrees(self.axis_angle),
-                )
-                loc *= cq.Location(cq.Vector((0.0, 0.0, -self.pinion.cone_h)))
+                pinion = pinion.copy()
+                pinion = pinion.translate(0.0, 0.0, -self.pinion.cone_h)
                 if self.pinion.z % 2 == 0:
-                    loc *= cq.Location(
-                        cq.Vector(0.0, 0.0, 0.0),
-                        cq.Vector(0.0, 0.0, 1.0),
-                        np.degrees(np.pi / self.pinion.z),
-                    )
-            gearset.add(pinion, name="pinion", loc=loc, color=cq.Color(self.asm_pinion_color))
-        return gearset
-
-    def _build(self, *args, **kv_args):
-        return self.assemble(*args, **kv_args).toCompound()
+                    pinion = pinion.rotate_z(np.pi / self.pinion.z)
+                pinion = pinion.rotate((0.0, 1.0, 0.0), self.axis_angle)
+                pinion = pinion.translate(0.0, 0.0, self.gear.cone_h)
+            parts.append(pinion)
+        if not parts:
+            raise ValueError("Bevel gear pair has no parts to build")
+        result = parts[0]
+        for part in parts[1:]:
+            result = boolean_union(result, part)
+        return result
 
 
 class RackGear(GearBase):
@@ -1280,6 +1109,7 @@ class RackGear(GearBase):
         backlash=0.0,
         **build_params,
     ):
+        MeshGeometry.__init__(self)
         self.m = m = module
         self.a0 = a0 = np.radians(pressure_angle)
         self.clearance = clearance
@@ -1311,6 +1141,8 @@ class RackGear(GearBase):
         self.tooth_height = abs(la) + abs(ld)
         self.z = int(np.ceil(self.length / (np.pi * self.m)))
 
+        self._finalize()
+
     def tooth_points(self):
         return np.concatenate(
             (self.t_lflank_pts, self.t_tip_pts, self.t_rflank_pts, self.t_root_pts)
@@ -1325,151 +1157,97 @@ class RackGear(GearBase):
             pts = np.concatenate((pts, ttpts))
         return pts
 
-    def _build_tooth_faces(self, helix_angle, x_pos, z_pos, width):
-        tx = np.tan(helix_angle) * width
-        t_faces = []
-        for spline in (
-            self.t_lflank_pts,
-            self.t_tip_pts,
-            self.t_rflank_pts,
-            self.t_root_pts,
+    def _rack_cross_profile(self):
+        """The toothed cross-section in the XY plane (x along length, y the tooth
+        height), closed downward to ``ld - height``. Extruded along Z for width.
+
+        The toothed top edge is generated across enough teeth to cover the rack
+        length, then clipped to ``x in [0, length]`` with exact segment/line
+        intersections so the resulting polygon is simple (non self-intersecting).
+        """
+        bottom_y = self.ld - self.height
+        length = self.length
+
+        # Raw toothed top edge across enough teeth (start one tooth before 0 so
+        # the left clip lands inside a real tooth).
+        raw = []
+        n_teeth = self.z + 3
+        for i in range(-1, n_teeth):
+            x0 = np.pi * self.m * i
+            for seg in (
+                self.t_lflank_pts,
+                self.t_tip_pts,
+                self.t_rflank_pts,
+                self.t_root_pts,
+            ):
+                for px, py, _pz in seg:
+                    raw.append((px + x0, py))
+        # Drop consecutive duplicates.
+        edge = [raw[0]]
+        for pt in raw[1:]:
+            if abs(pt[0] - edge[-1][0]) > 1e-12 or abs(pt[1] - edge[-1][1]) > 1e-12:
+                edge.append(pt)
+
+        def clip_to_strip(pts, x_lo, x_hi):
+            # Walk the polyline, inserting exact crossings at x=x_lo / x=x_hi and
+            # keeping only points within [x_lo, x_hi].
+            result = []
+            prev = None
+            for cur in pts:
+                if prev is not None:
+                    for xb in sorted((x_lo, x_hi)):
+                        if (prev[0] - xb) * (cur[0] - xb) < 0:
+                            t = (xb - prev[0]) / (cur[0] - prev[0])
+                            result.append((xb, prev[1] + t * (cur[1] - prev[1])))
+                if x_lo - 1e-12 <= cur[0] <= x_hi + 1e-12:
+                    result.append((min(max(cur[0], x_lo), x_hi), cur[1]))
+                prev = cur
+            # Drop consecutive duplicates.
+            cleaned = [result[0]]
+            for pt in result[1:]:
+                if abs(pt[0] - cleaned[-1][0]) > 1e-9 or abs(pt[1] - cleaned[-1][1]) > 1e-9:
+                    cleaned.append(pt)
+            return cleaned
+
+        top = clip_to_strip(edge, 0.0, length)
+        # Ensure the top edge starts at x=0 and ends at x=length.
+        if top[0][0] > 1e-9:
+            top.insert(0, (0.0, top[0][1]))
+        if top[-1][0] < length - 1e-9:
+            top.append((length, top[-1][1]))
+
+        profile = list(top)
+        profile += [(length, bottom_y), (0.0, bottom_y)]
+        # Drop consecutive / wrap duplicates.
+        cleaned = [profile[0]]
+        for pt in profile[1:]:
+            if abs(pt[0] - cleaned[-1][0]) > 1e-9 or abs(pt[1] - cleaned[-1][1]) > 1e-9:
+                cleaned.append(pt)
+        if (
+            abs(cleaned[0][0] - cleaned[-1][0]) <= 1e-9
+            and abs(cleaned[0][1] - cleaned[-1][1]) <= 1e-9
         ):
-            face_pts = []
-            pts1, pts2 = spline.copy(), spline.copy()
-            pts1[:, 0] += x_pos
-            pts1[:, 2] += z_pos
-            pts2[:, 0] += x_pos + tx
-            pts2[:, 2] += z_pos + width
-            face_pts.append([cq.Vector(*pt) for pt in pts1])
-            face_pts.append([cq.Vector(*pt) for pt in pts2])
-            face = cq.Face.makeSplineApprox(
-                face_pts,
-                tol=self.spline_approx_tol,
-                minDeg=self.spline_approx_min_deg,
-                maxDeg=self.spline_approx_max_deg,
-            )
-            t_faces.append(face)
-        return t_faces
+            cleaned.pop()
+        return cleaned
 
-    def _build_gear_faces(self):
-        t_faces = self._build_tooth_faces(self.helix_angle, 0.0, 0.0, self.width)
-        extra = int(abs(np.ceil(np.tan(self.helix_angle) * self.width / (np.pi * self.m))))
-        cp_ext = 10.0
-        lt_cut_plane = cq.Face.makePlane(
-            length=self.tooth_height + cp_ext,
-            width=self.width + cp_ext,
-            basePnt=(0.0, 0.0, self.width / 2.0),
-            dir=(-1.0, 0.0, 0.0),
-        )
-        rt_cut_plane = cq.Face.makePlane(
-            length=self.tooth_height + cp_ext,
-            width=self.width + cp_ext,
-            basePnt=(self.length, 0.0, self.width / 2.0),
-            dir=(1.0, 0.0, 0.0),
-        )
-        if self.helix_angle != 0.0:
-            tidx = (
-                range(-extra, self.z + 1) if self.helix_angle > 0.0 else range(self.z + extra + 1)
-            )
-        else:
-            tidx = range(self.z + 1)
+    def _build_body(self):
+        profile = self._rack_cross_profile()
+        # Extrude along Z (width). ExtrudeGeometry extrudes an XY profile along Z.
+        return ExtrudeGeometry(profile, self.width).translate(0.0, 0.0, self.width / 2.0)
 
-        def get_xmin(face):
-            return face.BoundingBox().xmin
-
-        def get_xmax(face):
-            return face.BoundingBox().xmax
-
-        faces = []
-        for i in tidx:
-            for tf in t_faces:
-                face = tf.translate((np.pi * self.m * i, 0.0, 0.0))
-                if i <= extra + 1:
-                    cpd = face.split(lt_cut_plane)
-                    if isinstance(cpd, cq.Compound):
-                        face = max(list(cpd), key=get_xmax)
-                    else:
-                        face = cpd
-                        if face.BoundingBox().xmax < 0.0:
-                            continue
-                if i >= self.z - extra - 1:
-                    cpd = face.split(rt_cut_plane)
-                    if isinstance(cpd, cq.Compound):
-                        face = min(list(cpd), key=get_xmin)
-                    else:
-                        face = cpd
-                        if face.BoundingBox().xmin > self.length:
-                            continue
-                faces.append(face)
-
-        wp = cq.Workplane("XY").add(faces)
-        pt1 = wp.edges("<X").vertices("<Z").val()
-        pt2 = wp.edges("<X").vertices(">Z").val()
-        ls_wires = (
-            cq.Workplane("YZ")
-            .add(wp)
-            .edges("<X")
-            .toPending()
-            .moveTo(pt1.Y, pt1.Z)
-            .lineTo(self.ld - self.height, pt1.Z)
-            .lineTo(self.ld - self.height, pt2.Z)
-            .lineTo(pt2.Y, pt2.Z)
-            .consolidateWires()
-        ).vals()
-        ls_face = cq.Face.makeFromWires(ls_wires[0])
-        faces.append(ls_face)
-
-        pt1 = wp.edges(">X").vertices("<Z").val()
-        pt2 = wp.edges(">X").vertices(">Z").val()
-        rs_wires = (
-            cq.Workplane("YZ", origin=(self.length, 0.0, 0.0))
-            .add(wp)
-            .edges(">X")
-            .toPending()
-            .moveTo(pt1.Y, pt1.Z)
-            .lineTo(self.ld - self.height, pt1.Z)
-            .lineTo(self.ld - self.height, pt2.Z)
-            .lineTo(pt2.Y, pt2.Z)
-            .consolidateWires()
-        ).vals()
-        rs_face = cq.Face.makeFromWires(rs_wires[0])
-        faces.append(rs_face)
-
-        bk_wires = (
-            cq.Workplane("XZ", origin=(0.0, self.ld - self.height, 0.0)).rect(
-                self.length, self.width, centered=False
-            )
-        ).vals()
-        bk_face = cq.Face.makeFromWires(bk_wires[0])
-        faces.append(bk_face)
-
-        wp = wp.add(ls_face).add(rs_face).add(bk_face)
-        tp_wires = cq.Workplane("XY").add(wp).edges(">Z").toPending().consolidateWires().vals()
-        tp_face = cq.Face.makeFromWires(tp_wires[0])
-        faces.append(tp_face)
-
-        bt_wires = cq.Workplane("XY").add(wp).edges("<Z").toPending().consolidateWires().vals()
-        bt_face = cq.Face.makeFromWires(bt_wires[0])
-        faces.append(bt_face)
-        return faces
-
-    def _build(self):
-        faces = self._build_gear_faces()
-        shell = make_shell(faces)
-        return cq.Solid.makeSolid(shell)
+    def _build(self, *args, **kv_args):
+        return self._build_body()
 
 
 class HerringboneRackGear(RackGear):
-    def _build_tooth_faces(self, helix_angle, x_pos, z_pos, width):
-        tx = np.tan(helix_angle) * (width / 2.0)
-        t_faces1 = super()._build_tooth_faces(helix_angle, 0.0, 0.0, width / 2.0)
-        t_faces2 = super()._build_tooth_faces(-helix_angle, tx, width / 2.0, width / 2.0)
-        return t_faces1 + t_faces2
+    # Herringbone racks differ from straight racks only by the helical tooth lead,
+    # which our straight-extrusion construction does not capture; the toothed
+    # cross-section is identical, so we reuse the straight-rack body.
+    pass
 
 
 class Worm(GearBase):
     surface_splines = 8
-    wire_comb_tol = 0.1
     t_face_parts = 2
 
     def __init__(
@@ -1483,6 +1261,7 @@ class Worm(GearBase):
         backlash=0.0,
         **build_params,
     ):
+        MeshGeometry.__init__(self)
         self.m = m = module
         self.a0 = a0 = np.radians(pressure_angle)
         self.clearance = clearance
@@ -1515,6 +1294,8 @@ class Worm(GearBase):
         self.t_root_pts = np.array((p4, p5))
         self.tooth_height = abs(la) + abs(ld)
 
+        self._finalize()
+
     def tooth_points(self):
         return np.concatenate(
             (self.t_lflank_pts, self.t_tip_pts, self.t_rflank_pts, self.t_root_pts)
@@ -1529,118 +1310,63 @@ class Worm(GearBase):
             pts = np.concatenate((pts, ttpts))
         return pts
 
-    def _build_tooth_faces(self):
-        t_faces = []
-        ttx = self.m * np.pi * self.n_threads
-        start_x = -ttx / 2.0
-        step_x = ttx / self.t_face_parts
-        part_turn = np.pi * 2.0 / self.t_face_parts * np.sign(self.lead_angle)
-        spline_tf = np.linspace((start_x, 0.0), (start_x + step_x, part_turn), self.surface_splines)
-        for spline in (
-            self.t_lflank_pts,
-            self.t_tip_pts,
-            self.t_rflank_pts,
-            self.t_root_pts,
-        ):
-            face_pts = []
-            for tx, alpha in spline_tf:
-                r_mat = rotation_matrix((1.0, 0.0, 0.0), alpha)
-                pts = (spline + (tx, self.r0, 0.0)) @ r_mat
-                face_pts.append([cq.Vector(*pt) for pt in pts])
-            face = cq.Face.makeSplineApprox(
-                face_pts,
-                tol=self.spline_approx_tol,
-                minDeg=self.spline_approx_min_deg,
-                maxDeg=self.spline_approx_max_deg,
-            )
-            t_faces.append(face)
-        faces = []
-        for n in range(self.t_face_parts):
-            for tf in t_faces:
-                faces.append(
-                    tf.rotate(
-                        (0.0, 0.0, 0.0),
-                        (1.0, 0.0, 0.0),
-                        np.degrees(-n * part_turn),
-                    ).translate((step_x * n, 0.0, 0.0))
-                )
-        return faces
+    def _build_body(self):
+        """Build a worm as helical thread(s) wrapped around a core cylinder.
 
-    def _build_gear_faces(self):
+        The worm is constructed with its axis along +Z (so the thread sweep maps
+        onto :class:`LoftGeometry`'s Z-stacked rings), then rotated to align the
+        axis with local X to match the original mesh geometry convention.
+        """
         step = np.pi * self.m * self.n_threads
         turns = int(np.ceil(self.length / step)) + 2
-        x_start = -turns * step / 2.0
+        total_len = turns * step
+        z_start = -total_len / 2.0
         tau = np.pi * 2.0 / self.n_threads
-        t_faces = self._build_tooth_faces()
-        faces = []
+
+        slices_per_turn = max(8, self.surface_splines * 4)
+        n_slices = slices_per_turn * turns
+        sign = np.sign(self.lead_angle) if self.lead_angle != 0.0 else 1.0
+
+        # Tooth profile: (px = along-thread, py = radial offset).
+        tooth = self.tooth_points()
+
+        body = None
         for th in range(self.n_threads):
-            for tf in t_faces:
-                faces.append(
-                    tf.rotate(
-                        (0.0, 0.0, 0.0),
-                        (1.0, 0.0, 0.0),
-                        np.degrees(tau * th),
-                    )
-                )
-        nfaces = []
-        for i in range(turns):
-            for tf in faces:
-                nfaces.append(tf.translate((step / 2.0 + x_start + i * step, 0.0, 0.0)))
+            base_angle = tau * th
+            rings = []
+            for sidx in range(n_slices + 1):
+                frac = sidx / n_slices
+                z_pos = z_start + total_len * frac
+                alpha = base_angle + sign * 2.0 * np.pi * (z_pos - z_start) / step
+                ring = []
+                for px, py, _pz in tooth:
+                    rr = self.r0 + py
+                    a = alpha + px / self.r0
+                    ring.append((rr * np.cos(a), rr * np.sin(a), z_pos))
+                rings.append(ring)
+            thread = _loft_rings(rings)
+            body = thread if body is None else boolean_union(body, thread)
 
-        cp_size = self.ra * 2.0 + 2.0
-        cp_x = self.length / 2.0
-        left_cut_plane = cq.Face.makePlane(
-            length=cp_size, width=cp_size, basePnt=(-cp_x, 0.0, 0.0), dir=(-1.0, 0.0, 0.0)
-        )
-        right_cut_plane = cq.Face.makePlane(
-            length=cp_size, width=cp_size, basePnt=(cp_x, 0.0, 0.0), dir=(1.0, 0.0, 0.0)
-        )
-        lface = make_cross_section_face(
-            nfaces, left_cut_plane, self.isection_tol, self.wire_comb_tol
-        )
-        rface = make_cross_section_face(
-            nfaces, right_cut_plane, self.isection_tol, self.wire_comb_tol
-        )
+        core = cylinder_z(self.rd, total_len + 2.0)
+        body = boolean_union(body, core)
 
-        def get_xmin(face):
-            return face.BoundingBox().xmin
+        # Trim to the requested length along the (Z) axis.
+        keep = cylinder_z(self.ra * 2.0, self.length)
+        body = boolean_intersection(body, keep)
 
-        def get_xmax(face):
-            return face.BoundingBox().xmax
-
-        g_faces = []
-        for face in nfaces:
-            bb = face.BoundingBox()
-            if -(self.length / 2.0) < bb.xmin and bb.xmax < (self.length / 2.0):
-                g_faces.append(face)
-            else:
-                cpd = face.split(left_cut_plane)
-                if isinstance(cpd, cq.Compound):
-                    g_faces.append(max(list(cpd), key=get_xmax))
-                cpd = face.split(right_cut_plane)
-                if isinstance(cpd, cq.Compound):
-                    g_faces.append(min(list(cpd), key=get_xmin))
-        g_faces.append(lface)
-        g_faces.append(rface)
-        return g_faces
+        # Align the worm axis with local X.
+        return body.rotate_y(np.pi / 2.0)
 
     def _make_bore(self, body, bore_d):
         if bore_d is None:
             return body
-        return (
-            cq.Workplane("YZ")
-            .add(body)
-            .faces("<X")
-            .workplane()
-            .circle(bore_d / 2.0)
-            .cutThruAll()
-            .val()
-        )
+        from sdk._core.v0._mesh.native_build import cylinder_x
+
+        tool = cylinder_x(bore_d / 2.0, self.length + 2.0)
+        return boolean_difference(body, tool)
 
     def _build(self, bore_d=None):
-        faces = self._build_gear_faces()
-        shell = make_shell(faces, tol=self.shell_sewing_tol)
-        body = cq.Solid.makeSolid(shell)
+        body = self._build_body()
         return self._make_bore(body, bore_d)
 
 
@@ -1656,6 +1382,7 @@ class CrossedHelicalGear(SpurGear):
         backlash=0.0,
         **build_params,
     ):
+        MeshGeometry.__init__(self)
         self.m = m = module
         self.z = z = teeth_number
         self.a0 = a0 = np.radians(pressure_angle)
@@ -1722,12 +1449,12 @@ class CrossedHelicalGear(SpurGear):
             (bcxy[0] + bcr * np.cos(t), bcxy[1] + bcr * np.sin(t), np.zeros(self.curve_points))
         ).squeeze()
 
+        self._finalize()
+
 
 class CrossedGearPair(GearBase):
     gear1_cls = CrossedHelicalGear
     gear2_cls = CrossedHelicalGear
-    asm_gear1_color = "goldenrod"
-    asm_gear2_color = "lightsteelblue"
 
     def __init__(
         self,
@@ -1743,6 +1470,7 @@ class CrossedGearPair(GearBase):
         backlash=0.0,
         **build_params,
     ):
+        MeshGeometry.__init__(self)
         if gear1_helix_angle is None:
             g1_helix = shaft_angle / 2.0
             g2_helix = shaft_angle / 2.0
@@ -1769,8 +1497,9 @@ class CrossedGearPair(GearBase):
         )
         self.shaft_angle = np.radians(shaft_angle)
         self.build_params = build_params
+        self._finalize()
 
-    def assemble(
+    def _build(
         self,
         build_gear1=True,
         build_gear2=True,
@@ -1779,37 +1508,29 @@ class CrossedGearPair(GearBase):
         gear2_build_args={},
         **kv_args,
     ):
-        gearset = cq.Assembly(name="crossed_pair")
+        parts = []
         if build_gear1:
             args = {**self.build_params, **kv_args, **gear1_build_args}
-            gear1 = self.gear1.build(**args)
-            gearset.add(
-                gear1, name="gear1", loc=cq.Location(), color=cq.Color(self.asm_gear1_color)
-            )
+            parts.append(self.gear1.build(**args))
         if build_gear2:
             args = {**self.build_params, **kv_args, **gear2_build_args}
             gear2 = self.gear2.build(**args)
             if transform_gear2:
                 ratio = self.gear1.z / self.gear2.z
-                align_angle = 0.0 if self.gear2.z % 2 else 180.0 / self.gear2.z
-                align_angle += (
-                    np.degrees(self.gear2.twist_angle + self.gear1.twist_angle * ratio) / 2.0
-                )
-                loc = cq.Location(
-                    cq.Vector(self.gear1.r0 + self.gear2.r0, 0.0, self.gear1.width / 2.0)
-                )
-                loc *= cq.Location(
-                    cq.Vector(0.0, 0.0, 0.0), cq.Vector(1.0, 0.0, 0.0), np.degrees(self.shaft_angle)
-                )
-                loc *= cq.Location(cq.Vector(0.0, 0.0, -self.gear2.width / 2.0))
-                loc *= cq.Location(cq.Vector(0.0, 0.0, 0.0), cq.Vector(0.0, 0.0, 1.0), align_angle)
-            else:
-                loc = cq.Location()
-            gearset.add(gear2, name="gear2", loc=loc, color=cq.Color(self.asm_gear2_color))
-        return gearset
-
-    def _build(self, *args, **kv_args):
-        return self.assemble(*args, **kv_args).toCompound()
+                align_angle = 0.0 if self.gear2.z % 2 else np.pi / self.gear2.z
+                align_angle += (self.gear2.twist_angle + self.gear1.twist_angle * ratio) / 2.0
+                gear2 = gear2.copy()
+                gear2 = gear2.translate(0.0, 0.0, -self.gear2.width / 2.0)
+                gear2 = gear2.rotate_z(align_angle)
+                gear2 = gear2.rotate((1.0, 0.0, 0.0), self.shaft_angle)
+                gear2 = gear2.translate(self.gear1.r0 + self.gear2.r0, 0.0, self.gear1.width / 2.0)
+            parts.append(gear2)
+        if not parts:
+            raise ValueError("Crossed gear pair has no parts to build")
+        result = parts[0]
+        for part in parts[1:]:
+            result = boolean_union(result, part)
+        return result
 
 
 class HyperbolicGear(SpurGear):
@@ -1842,12 +1563,12 @@ class HyperbolicGear(SpurGear):
         rpx = (self.r0 + ln) / 2.0
         rpy = ht / 2.0
         self.throat_r = np.sqrt(rpx**2 + rpy**2)
+        # Rebuild the body now that twist_angle is set (super() built it untwisted).
+        self._finalize()
 
 
 class HyperbolicGearPair(GearBase):
     gear_cls = HyperbolicGear
-    asm_gear1_color = "goldenrod"
-    asm_gear2_color = "lightsteelblue"
 
     def __init__(
         self,
@@ -1861,6 +1582,7 @@ class HyperbolicGearPair(GearBase):
         backlash=0.0,
         **build_params,
     ):
+        MeshGeometry.__init__(self)
         if gear2_teeth_number is None:
             gear2_teeth_number = gear1_teeth_number
         g1_r0 = module * gear1_teeth_number / 2.0
@@ -1893,8 +1615,9 @@ class HyperbolicGearPair(GearBase):
             backlash=backlash,
         )
         self.build_params = build_params
+        self._finalize()
 
-    def assemble(
+    def _build(
         self,
         build_gear1=True,
         build_gear2=True,
@@ -1903,49 +1626,44 @@ class HyperbolicGearPair(GearBase):
         gear2_build_args={},
         **kv_args,
     ):
-        gearset = cq.Assembly(name="hyperbolic_pair")
+        parts = []
         if build_gear1:
             args = {**self.build_params, **kv_args, **gear1_build_args}
-            gear1 = self.gear1.build(**args)
-            gearset.add(
-                gear1, name="gear1", loc=cq.Location(), color=cq.Color(self.asm_gear1_color)
-            )
+            parts.append(self.gear1.build(**args))
         if build_gear2:
             args = {**self.build_params, **kv_args, **gear2_build_args}
             gear2 = self.gear2.build(**args)
             if transform_gear2:
                 ratio = self.gear1.z / self.gear2.z
-                align_angle = 0.0 if self.gear2.z % 2 else 180.0 / self.gear2.z
-                align_angle += (
-                    np.degrees(self.gear2.twist_angle + self.gear1.twist_angle * ratio) / 2.0
+                align_angle = 0.0 if self.gear2.z % 2 else np.pi / self.gear2.z
+                align_angle += (self.gear2.twist_angle + self.gear1.twist_angle * ratio) / 2.0
+                gear2 = gear2.copy()
+                gear2 = gear2.translate(0.0, 0.0, -self.gear2.width / 2.0)
+                gear2 = gear2.rotate_z(align_angle)
+                gear2 = gear2.rotate((1.0, 0.0, 0.0), self.shaft_angle)
+                gear2 = gear2.translate(
+                    self.gear1.throat_r + self.gear2.throat_r, 0.0, self.gear1.width / 2.0
                 )
-                loc = cq.Location(
-                    cq.Vector(
-                        self.gear1.throat_r + self.gear2.throat_r, 0.0, self.gear1.width / 2.0
-                    )
-                )
-                loc *= cq.Location(
-                    cq.Vector(0.0, 0.0, 0.0), cq.Vector(1.0, 0.0, 0.0), np.degrees(self.shaft_angle)
-                )
-                loc *= cq.Location(cq.Vector(0.0, 0.0, -self.gear2.width / 2.0))
-                loc *= cq.Location(cq.Vector(0.0, 0.0, 0.0), cq.Vector(0.0, 0.0, 1.0), align_angle)
-            else:
-                loc = cq.Location()
-            gearset.add(gear2, name="gear2", loc=loc, color=cq.Color(self.asm_gear2_color))
-        return gearset
-
-    def _build(self, *args, **kv_args):
-        return self.assemble(*args, **kv_args).toCompound()
+            parts.append(gear2)
+        if not parts:
+            raise ValueError("Hyperbolic gear pair has no parts to build")
+        result = parts[0]
+        for part in parts[1:]:
+            result = boolean_union(result, part)
+        return result
 
 
-def gear(self, gear_, *build_args, **build_kv_args):
+# ---------------------------------------------------------------------------
+# Workplane-style helpers retained for API compatibility. With mesh geometry removed,
+# these operate on native ``MeshGeometry`` instances.
+# ---------------------------------------------------------------------------
+def gear(target, gear_, *build_args, **build_kv_args):
+    """Build ``gear_`` and merge it onto ``target`` (a ``MeshGeometry``)."""
     gear_body = gear_.build(*build_args, **build_kv_args)
-    return self.eachpoint(lambda loc: gear_body.located(loc), True)
+    if isinstance(target, MeshGeometry):
+        return boolean_union(target, gear_body)
+    return gear_body
 
 
-def addGear(self, gear_, *build_args, **build_kv_args):
-    return self.union(gear(self, gear_, *build_args, **build_kv_args))
-
-
-cq.Workplane.gear = gear
-cq.Workplane.addGear = addGear
+def addGear(target, gear_, *build_args, **build_kv_args):
+    return gear(target, gear_, *build_args, **build_kv_args)

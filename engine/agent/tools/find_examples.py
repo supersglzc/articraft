@@ -79,7 +79,7 @@ class FindExamplesTool(BaseDeclarativeTool):
                 "return sufficiently relevant full markdown matches.\n\n"
                 "Search checks file names, titles, descriptions, tags, prose, and code "
                 "identifiers. It works best with short concrete queries such as object names, "
-                "feature names, geometry operations, CadQuery API names, or exact example "
+                "feature names, geometry operations, mesh geometry API names, or exact example "
                 "titles.\n\n"
                 "When strong matches do not exist, the tool may return `[weakly relevant]` "
                 "results as inspiration-only hints. Treat those cautiously.\n\n"
