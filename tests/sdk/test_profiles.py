@@ -19,6 +19,8 @@ def test_sdk_docs_profile_includes_base_geometry_topics() -> None:
     assert "sdk/_docs/base/46_section_lofts.md" in base_docs
     assert "sdk/_docs/base/48_wheels_and_tires.md" in base_docs
     assert "sdk/_docs/base/49_hinges.md" in base_docs
+    assert "sdk/_docs/base/50_gears.md" in base_docs
+    assert "sdk/_docs/base/51_positioning_and_transforms.md" in base_docs
     assert "sdk/_docs/base/47_shell_partition.md" not in base_docs
     assert not any("cadquery" in path for path in base_docs)
 

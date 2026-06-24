@@ -63,9 +63,13 @@ Additional geometry references:
   surrounds.
 - `geometry/wheels-and-tires.md`: wheel structure, tire carcasses, tread, and sidewalls.
 - `geometry/hinges.md`: exposed barrel and piano hinge helpers.
+- `geometry/gears.md`: spur, helical, herringbone, ring, planetary, bevel, rack, and
+  worm gears (approximate involute profiles).
+- `geometry/positioning-and-transforms.md`: offsets, rotated placement, mirroring,
+  and repeated feature patterns (the native replacement for workplane mechanics).
 
 If a prompt clearly names a semantic part family such as a knob, bezel, wheel,
-tire, vent grille, bracket, or hinge, read that focused geometry page before
+tire, vent grille, bracket, gear, or hinge, read that focused geometry page before
 falling back to the low-level mesh page.
 
 Read the exact document you need. Do not guess helper names or signatures from memory.

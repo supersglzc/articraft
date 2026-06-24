@@ -373,6 +373,9 @@ lip = LatheGeometry.from_shell_profiles(
 - `47_bezels_and_frames.md` for display, trim, and frame helpers
 - `48_wheels_and_tires.md` for wheel and tire geometry helpers
 - `49_hinges.md` for exposed hinge geometry helpers
+- `50_gears.md` for parametric involute, bevel, worm, rack, and planetary gears
+- `51_positioning_and_transforms.md` for offsets, rotated placement, mirroring,
+  and repeated feature patterns
 - `50_placement.md` for wrapping and mounting mesh-backed geometry
 
 ## Clarifications for agent usage
@@ -393,3 +396,69 @@ lip = LatheGeometry.from_shell_profiles(
   For `superellipse_side_loft(...)`, `split_superellipse_side_loft(...)`, and
   `resample_side_sections(...)`, each section is `(y, z_min, z_max, width)`
   with the loft axis along `+Y` and each profile section lying in `XZ`.
+
+## Boolean Composition
+
+Combine or carve solids with the boolean helpers. Each takes two
+`MeshGeometry` solids and returns a new watertight `MeshGeometry`.
+
+```python
+from sdk import boolean_union, boolean_difference, boolean_intersection
+```
+
+| Intent | Helper |
+| --- | --- |
+| Fuse two overlapping solids into one body | `boolean_union(a, b)` |
+| Carve `b` out of `a` (holes, pockets, bores) | `boolean_difference(a, b)` |
+| Keep only the overlapping volume | `boolean_intersection(a, b)` |
+
+Operand requirements:
+
+- Both operands must be closed, watertight solids. The primitive builders
+  (`BoxGeometry`, `CylinderGeometry`, `SphereGeometry`, …) and the semantic
+  generators already produce these. Open shells, single faces, and
+  zero-thickness geometry are not valid boolean operands.
+- For a clean cut, the cutting tool must fully cross the surface it pierces.
+  Make through-bores slightly longer than the wall they pass through so the
+  entry and exit faces are not left coplanar with the body.
+- Build each operand at its final pose first (apply `.translate(...)` /
+  `.rotate(...)` before the boolean); the helpers operate in the shared frame.
+  Transforms mutate in place and return the geometry, so chain them on freshly
+  constructed operands rather than reusing one base instance.
+
+When NOT to reach for booleans:
+
+- To assemble an object from distinct parts that move or read as separate
+  pieces, use `model.part(...)` + `part.visual(...)` with the placement helpers,
+  not a single fused boolean body.
+- For repeated holes in a panel or plate, prefer `ExtrudeWithHolesGeometry` or
+  `PerforatedPanelGeometry`; for an opening throat on a face, see
+  `cut_opening_on_face`. Use raw `boolean_difference` when the cut shape is
+  arbitrary or is not a simple repeated hole pattern.
+
+Worked example — a flanged bushing with a through-bore and a side flat:
+
+```python
+from sdk import (
+    BoxGeometry,
+    CylinderGeometry,
+    boolean_difference,
+    boolean_union,
+    mesh_from_geometry,
+)
+
+body = CylinderGeometry(radius=0.020, height=0.040)
+flange = CylinderGeometry(radius=0.032, height=0.006).translate(0.0, 0.0, -0.017)
+blank = boolean_union(body, flange)
+
+bore = CylinderGeometry(radius=0.010, height=0.060)  # longer than the body it pierces
+flat = BoxGeometry((0.02, 0.02, 0.06)).translate(0.018, 0.0, 0.0)  # D-flat cutter
+bushing = boolean_difference(boolean_difference(blank, bore), flat)
+
+mesh = mesh_from_geometry(bushing, "flanged_bushing")
+```
+
+Booleans run on a fast solid-mesh engine and return a single watertight body;
+for unusually complex unions the SDK automatically upgrades the result to an
+exact solver, so you can chain operations without managing tessellation
+yourself.

@@ -60,6 +60,8 @@ _BASE_DOCS = (
     Path("sdk/_docs/base/47_bezels_and_frames.md"),
     Path("sdk/_docs/base/48_wheels_and_tires.md"),
     Path("sdk/_docs/base/49_hinges.md"),
+    Path("sdk/_docs/base/50_gears.md"),
+    Path("sdk/_docs/base/51_positioning_and_transforms.md"),
 )
 
 _SDK_PACKAGE_ALIASES = {

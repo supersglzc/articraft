@@ -25,6 +25,8 @@ def test_load_sdk_docs_bundle_mounts_router_and_default_refs() -> None:
     assert "docs/sdk/references/geometry/wheels-and-tires.md" in bundle.files_by_path
     assert "docs/sdk/references/geometry/hinges.md" in bundle.files_by_path
     assert "docs/sdk/references/geometry/section-lofts.md" in bundle.files_by_path
+    assert "docs/sdk/references/geometry/gears.md" in bundle.files_by_path
+    assert "docs/sdk/references/geometry/positioning-and-transforms.md" in bundle.files_by_path
     assert not any("cadquery" in path for path in bundle.files_by_path)
 
 

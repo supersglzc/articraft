@@ -50,6 +50,8 @@ from sdk import (
     MotionLimits,
     Origin,
     Sphere,
+    TestContext,
+    TestReport,
     mesh_from_geometry,
     tube_from_spline_points,
 )
@@ -255,4 +257,31 @@ def build_object_model() -> ArticulatedObject:
     )
 
     return model
+
+
+def run_tests() -> TestReport:
+    ctx = TestContext(object_model)
+
+    base = object_model.get_part("base")
+    upper_pole = object_model.get_part("upper_pole")
+    desk = object_model.get_part("desk")
+    ctx.check("base_part_present", base is not None, "Expected a base part.")
+    ctx.check("upper_pole_part_present", upper_pole is not None, "Expected an upper_pole part.")
+    ctx.check("desk_part_present", desk is not None, "Expected a desk part.")
+    if base is None or upper_pole is None or desk is None:
+        return ctx.report()
+
+    desk_aabb = ctx.part_world_aabb(desk)
+    ctx.check("desk_aabb_present", desk_aabb is not None, "Expected a world AABB for the desk.")
+    if desk_aabb is None:
+        return ctx.report()
+
+    mins, maxs = desk_aabb
+    size = tuple(float(maxs[i] - mins[i]) for i in range(3))
+    ctx.check("desk_width", 0.50 <= size[0] <= 0.60, f"size={size!r}")
+    ctx.check("desk_tall", size[2] >= 0.30, f"size={size!r}")
+    return ctx.report()
+
+
+object_model = build_object_model()
 ```

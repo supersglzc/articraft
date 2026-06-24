@@ -187,4 +187,6 @@ _DOC_PATH_ALIASES = {
     "sdk/_docs/base/47_bezels_and_frames.md": "references/geometry/bezels-and-frames.md",
     "sdk/_docs/base/48_wheels_and_tires.md": "references/geometry/wheels-and-tires.md",
     "sdk/_docs/base/49_hinges.md": "references/geometry/hinges.md",
+    "sdk/_docs/base/50_gears.md": "references/geometry/gears.md",
+    "sdk/_docs/base/51_positioning_and_transforms.md": "references/geometry/positioning-and-transforms.md",
 }

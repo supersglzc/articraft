@@ -63,7 +63,7 @@ def build_object_model() -> ArticulatedObject:
                 hub=WheelHub(
                     radius=0.022,
                     width=0.026,
-                    cap_style="domed",
+                    cap_style="protruding",
                     bolt_pattern=BoltPattern(count=5, circle_diameter=0.028, hole_diameter=0.0035),
                 ),
                 face=WheelFace(dish_depth=0.004, front_inset=0.002),
