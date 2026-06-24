@@ -5,11 +5,11 @@ from math import sqrt
 from pathlib import Path
 from typing import Iterable, List, Sequence, Tuple, Union
 
-import manifold3d as _m3d
 import numpy as np
 
 from ..assets import get_active_asset_session
 from ..types import Mesh
+from ._manifold_backend import m3d as _m3d
 from .common import (
     _EPS,
     _OBJ_QUANT_STEP,

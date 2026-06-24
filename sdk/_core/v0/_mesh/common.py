@@ -7,11 +7,11 @@ from math import acos, asin, atan2, cos, isfinite, pi, sin, sqrt, tan
 from pathlib import Path
 from typing import Iterable, List, Literal, Optional, Sequence, Tuple, Union
 
-import manifold3d as _m3d
 import numpy as np
 
 from ..assets import get_active_asset_session
 from ..types import Box, Cylinder, Mesh, Sphere
+from ._manifold_backend import m3d as _m3d
 
 Vec2 = Tuple[float, float]
 Vec3 = Tuple[float, float, float]

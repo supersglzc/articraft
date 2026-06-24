@@ -60,7 +60,7 @@ _OPEN_FILE_WORKER_RESERVE = 64
 _OPEN_FILE_WORKER_FD_BUDGET = 8
 _COMPILE_TARGETS = {"full", "visual"}
 _BASE_BULK_PRELOAD_MODULES = ("engine.agent.compiler", "engine.viewer.api.store")
-_GEOMETRY_BULK_PRELOAD_MODULES = ("sdk", "manifold3d")
+_GEOMETRY_BULK_PRELOAD_MODULES = ("sdk", "sdk._core.v0._mesh._manifold_backend")
 _EXCEPTION_PREFIX_RE = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):\s*")
 _GEOMETRY_QC_MARKERS = (
     "isolated parts detected",
